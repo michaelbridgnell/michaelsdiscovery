@@ -1,4 +1,5 @@
 alembic==1.18.4
+flask-limiter
 gunicorn
 blinker==1.9.0
 click==8.3.1

@@ -1,15 +1,18 @@
+import re
 import secrets
 from functools import wraps
 
 from flask import Blueprint, jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from . import db
+from . import db, limiter
 from .music_api import search_tracks
 from .models import Track, User, UserToken, UserTaste, UserInteraction, Friendship
 from .taste import VectorTasteRecommender, CollaborativeRecommender, HybridRecommender
 
 bp = Blueprint('main', __name__)
+
+USERNAME_RE = re.compile(r'^[a-zA-Z0-9_]{3,50}$')
 
 
 # --------------------------------------------------
@@ -17,7 +20,6 @@ bp = Blueprint('main', __name__)
 # --------------------------------------------------
 
 def _get_current_user():
-    """Read Bearer token from header and return the User, or None."""
     auth = request.headers.get('Authorization', '')
     if not auth.startswith('Bearer '):
         return None
@@ -38,7 +40,7 @@ def require_auth(f):
 
 
 # --------------------------------------------------
-# Taste helpers (unchanged)
+# Taste helpers
 # --------------------------------------------------
 
 def _load_taste(user_id, songs):
@@ -90,12 +92,17 @@ def _record_feedback(user_id, track_id, rating):
 # --------------------------------------------------
 
 @bp.route('/register', methods=['POST'])
+@limiter.limit("5 per minute")
 def register():
-    data = request.get_json()
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
+    data = request.get_json(silent=True) or {}
+    username = data.get('username', '').strip()[:50]
+    password = data.get('password', '')[:100]
     if not username or not password:
         return jsonify({"error": "username and password required"}), 400
+    if not USERNAME_RE.match(username):
+        return jsonify({"error": "username must be 3-50 characters, letters/numbers/underscores only"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "password must be at least 8 characters"}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "username taken"}), 409
     user = User(username=username, password_hash=generate_password_hash(password))
@@ -108,11 +115,15 @@ def register():
 
 
 @bp.route('/login', methods=['POST'])
+@limiter.limit("10 per minute")
 def login():
-    data = request.get_json()
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
+    data = request.get_json(silent=True) or {}
+    username = data.get('username', '').strip()[:50]
+    password = data.get('password', '')[:100]
+    if not username or not password:
+        return jsonify({"error": "username and password required"}), 400
     user = User.query.filter_by(username=username).first()
+    # Constant-time check even on missing user to prevent user enumeration
     if user is None or not check_password_hash(user.password_hash, password):
         return jsonify({"error": "invalid credentials"}), 401
     token_str = secrets.token_hex(32)
@@ -122,15 +133,15 @@ def login():
 
 
 # --------------------------------------------------
-# Onboarding — seed taste from 3 known songs
+# Onboarding — seed taste from known songs
 # --------------------------------------------------
 
 @bp.route('/seed', methods=['POST'])
 @require_auth
+@limiter.limit("5 per minute")
 def seed(current_user):
-    """Accept up to 5 song titles the user already likes, seed their taste capsules."""
-    data = request.get_json()
-    titles = data.get('titles', [])
+    data = request.get_json(silent=True) or {}
+    titles = [str(t).strip()[:200] for t in data.get('titles', []) if str(t).strip()]
     if len(titles) < 3:
         return jsonify({"error": "provide at least 3 song titles"}), 400
     taste_model = _load_taste(current_user.id, [])
@@ -154,7 +165,9 @@ def seed(current_user):
 
 @bp.route('/recommendations/<search_term>')
 @require_auth
+@limiter.limit("30 per minute")
 def fetch_recommendations(current_user, search_term):
+    search_term = search_term.strip()[:100]
     tracks = search_tracks(search_term)
     songs = []
     for track in tracks:
@@ -183,9 +196,10 @@ def fetch_recommendations(current_user, search_term):
 
 @bp.route('/swipe/<int:track_id>', methods=['POST'])
 @require_auth
+@limiter.limit("60 per minute")
 def swipe(current_user, track_id):
-    data = request.get_json()
-    direction = data.get('direction')  # "like" or "dislike"
+    data = request.get_json(silent=True) or {}
+    direction = data.get('direction')
     if direction not in ('like', 'dislike'):
         return jsonify({"error": "direction must be like or dislike"}), 400
     rating = 1 if direction == 'like' else -1
@@ -225,9 +239,12 @@ def get_friend_requests(current_user):
 
 @bp.route('/friends/add', methods=['POST'])
 @require_auth
+@limiter.limit("20 per minute")
 def add_friend(current_user):
-    data = request.get_json()
-    username = data.get('username', '').strip()
+    data = request.get_json(silent=True) or {}
+    username = data.get('username', '').strip()[:50]
+    if not username:
+        return jsonify({"error": "username required"}), 400
     target = User.query.filter_by(username=username).first()
     if target is None:
         return jsonify({"error": "user not found"}), 404
@@ -252,22 +269,9 @@ def accept_friend(current_user, friendship_id):
     return jsonify({"status": "accepted"})
 
 
-@bp.route('/me/likes', methods=['GET'])
-@require_auth
-def my_likes(current_user):
-    liked = UserInteraction.query.filter_by(user_id=current_user.id, rating=1).all()
-    result = []
-    for interaction in liked:
-        track = Track.query.get(interaction.track_id)
-        if track:
-            result.append({"title": track.title, "artist": track.artist})
-    return jsonify(result)
-
-
 @bp.route('/friends/<int:friend_id>/taste', methods=['GET'])
 @require_auth
 def friend_taste(current_user, friend_id):
-    """Return a friend's top liked tracks — only if they are actually friends."""
     is_friends = Friendship.query.filter(
         ((Friendship.requester_id == current_user.id) & (Friendship.receiver_id == friend_id)) |
         ((Friendship.requester_id == friend_id) & (Friendship.receiver_id == current_user.id)),
@@ -276,6 +280,18 @@ def friend_taste(current_user, friend_id):
     if not is_friends:
         return jsonify({"error": "not friends"}), 403
     liked = UserInteraction.query.filter_by(user_id=friend_id, rating=1).all()
+    result = []
+    for interaction in liked:
+        track = Track.query.get(interaction.track_id)
+        if track:
+            result.append({"title": track.title, "artist": track.artist})
+    return jsonify(result)
+
+
+@bp.route('/me/likes', methods=['GET'])
+@require_auth
+def my_likes(current_user):
+    liked = UserInteraction.query.filter_by(user_id=current_user.id, rating=1).all()
     result = []
     for interaction in liked:
         track = Track.query.get(interaction.track_id)
