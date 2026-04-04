@@ -1,22 +1,22 @@
 import numpy as np
+from datetime import datetime, timezone
 from flaskr import db
 
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(255), unique=True, nullable=True)
     password_hash = db.Column(db.String(255), nullable=False)
 
 
 class UserToken(db.Model):
-    """Simple auth token issued on login."""
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     token = db.Column(db.String(64), unique=True, nullable=False)
 
 
 class UserTaste(db.Model):
-    """Stores a user's K capsule vectors as bytes."""
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, unique=True)
     capsules = db.Column(db.LargeBinary, nullable=False)
@@ -32,7 +32,6 @@ class UserTaste(db.Model):
 
 
 class UserInteraction(db.Model):
-    """Stores every like/dislike a user has made."""
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     track_id = db.Column(db.Integer, db.ForeignKey('track.id'), nullable=False)
@@ -40,11 +39,19 @@ class UserInteraction(db.Model):
 
 
 class Friendship(db.Model):
-    """Tracks friend relationships between users."""
     id = db.Column(db.Integer, primary_key=True)
     requester_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     receiver_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     accepted = db.Column(db.Boolean, default=False, nullable=False)
+
+
+class Post(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    username = db.Column(db.String(80), nullable=False)  # denormalized for fast display
+    content = db.Column(db.String(280), nullable=False)
+    category = db.Column(db.String(50), nullable=False, default='General')
+    created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 class Album(db.Model):

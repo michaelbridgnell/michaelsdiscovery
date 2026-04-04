@@ -7,12 +7,15 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 from . import db, limiter
 from .music_api import search_tracks
-from .models import Track, User, UserToken, UserTaste, UserInteraction, Friendship
+from .models import Track, User, UserToken, UserTaste, UserInteraction, Friendship, Post
 from .taste import VectorTasteRecommender, CollaborativeRecommender, HybridRecommender
 
 bp = Blueprint('main', __name__)
 
 USERNAME_RE = re.compile(r'^[a-zA-Z0-9_]{3,50}$')
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+VALID_CATEGORIES = {'General', 'Discovery', 'Recommendations', 'Music Talk', 'Question'}
 
 
 # --------------------------------------------------
@@ -96,44 +99,57 @@ def _record_feedback(user_id, track_id, rating):
 def register():
     data = request.get_json(silent=True) or {}
     username = data.get('username', '').strip()[:50]
+    email = data.get('email', '').strip().lower()[:255]
     password = data.get('password', '')[:100]
-    if not username or not password:
-        return jsonify({"error": "username and password required"}), 400
+
+    if not username or not email or not password:
+        return jsonify({"error": "username, email, and password are required"}), 400
     if not USERNAME_RE.match(username):
         return jsonify({"error": "username must be 3-50 characters, letters/numbers/underscores only"}), 400
+    if not EMAIL_RE.match(email):
+        return jsonify({"error": "invalid email address"}), 400
     if len(password) < 8:
         return jsonify({"error": "password must be at least 8 characters"}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({"error": "username taken"}), 409
-    user = User(username=username, password_hash=generate_password_hash(password))
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "email already registered"}), 409
+
+    user = User(username=username, email=email, password_hash=generate_password_hash(password))
     db.session.add(user)
     db.session.commit()
     token_str = secrets.token_hex(32)
     db.session.add(UserToken(user_id=user.id, token=token_str))
     db.session.commit()
-    return jsonify({"user_id": user.id, "token": token_str}), 201
+    return jsonify({"user_id": user.id, "token": token_str, "username": username}), 201
 
 
 @bp.route('/login', methods=['POST'])
 @limiter.limit("10 per minute")
 def login():
     data = request.get_json(silent=True) or {}
-    username = data.get('username', '').strip()[:50]
+    email = data.get('email', '').strip().lower()[:255]
     password = data.get('password', '')[:100]
-    if not username or not password:
-        return jsonify({"error": "username and password required"}), 400
-    user = User.query.filter_by(username=username).first()
-    # Constant-time check even on missing user to prevent user enumeration
+
+    if not email or not password:
+        return jsonify({"error": "email and password required"}), 400
+
+    # Look up by email; fall back to username for backwards compatibility
+    user = User.query.filter_by(email=email).first()
+    if user is None:
+        user = User.query.filter_by(username=email).first()
+
     if user is None or not check_password_hash(user.password_hash, password):
         return jsonify({"error": "invalid credentials"}), 401
+
     token_str = secrets.token_hex(32)
     db.session.add(UserToken(user_id=user.id, token=token_str))
     db.session.commit()
-    return jsonify({"user_id": user.id, "token": token_str})
+    return jsonify({"user_id": user.id, "token": token_str, "username": user.username})
 
 
 # --------------------------------------------------
-# Onboarding — seed taste from known songs
+# Onboarding
 # --------------------------------------------------
 
 @bp.route('/seed', methods=['POST'])
@@ -191,7 +207,7 @@ def fetch_recommendations(current_user, search_term):
 
 
 # --------------------------------------------------
-# Swipe (like/dislike)
+# Swipe
 # --------------------------------------------------
 
 @bp.route('/swipe/<int:track_id>', methods=['POST'])
@@ -204,6 +220,47 @@ def swipe(current_user, track_id):
         return jsonify({"error": "direction must be like or dislike"}), 400
     rating = 1 if direction == 'like' else -1
     return _record_feedback(current_user.id, track_id, rating)
+
+
+# --------------------------------------------------
+# Community Posts
+# --------------------------------------------------
+
+@bp.route('/posts', methods=['GET'])
+@require_auth
+@limiter.limit("60 per minute")
+def get_posts(current_user):
+    category = request.args.get('category', '').strip()
+    query = Post.query.order_by(Post.created_at.desc())
+    if category and category in VALID_CATEGORIES:
+        query = query.filter_by(category=category)
+    posts = query.limit(50).all()
+    return jsonify([{
+        "id": p.id,
+        "user_id": p.user_id,
+        "username": p.username,
+        "content": p.content,
+        "category": p.category,
+        "created_at": p.created_at.isoformat()
+    } for p in posts])
+
+
+@bp.route('/posts', methods=['POST'])
+@require_auth
+@limiter.limit("10 per minute")
+def create_post(current_user):
+    data = request.get_json(silent=True) or {}
+    content = data.get('content', '').strip()[:280]
+    category = data.get('category', 'General').strip()
+    if not content:
+        return jsonify({"error": "content required"}), 400
+    if category not in VALID_CATEGORIES:
+        category = 'General'
+    post = Post(user_id=current_user.id, username=current_user.username,
+                content=content, category=category)
+    db.session.add(post)
+    db.session.commit()
+    return jsonify({"id": post.id, "status": "created"}), 201
 
 
 # --------------------------------------------------
@@ -298,3 +355,10 @@ def my_likes(current_user):
         if track:
             result.append({"title": track.title, "artist": track.artist})
     return jsonify(result)
+
+
+@bp.route('/me/posts/count', methods=['GET'])
+@require_auth
+def my_post_count(current_user):
+    count = Post.query.filter_by(user_id=current_user.id).count()
+    return jsonify({"count": count})
