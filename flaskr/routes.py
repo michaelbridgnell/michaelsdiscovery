@@ -252,6 +252,18 @@ def accept_friend(current_user, friendship_id):
     return jsonify({"status": "accepted"})
 
 
+@bp.route('/me/likes', methods=['GET'])
+@require_auth
+def my_likes(current_user):
+    liked = UserInteraction.query.filter_by(user_id=current_user.id, rating=1).all()
+    result = []
+    for interaction in liked:
+        track = Track.query.get(interaction.track_id)
+        if track:
+            result.append({"title": track.title, "artist": track.artist})
+    return jsonify(result)
+
+
 @bp.route('/friends/<int:friend_id>/taste', methods=['GET'])
 @require_auth
 def friend_taste(current_user, friend_id):
