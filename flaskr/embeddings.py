@@ -1,5 +1,4 @@
 import numpy as np
-import laion_clap
 from .music_api import search_tracks, download_preview
 import os
 
@@ -8,6 +7,7 @@ _model = None
 def _get_model():
     global _model
     if _model is None:
+        import laion_clap
         _model = laion_clap.CLAP_Module(enable_fusion=False)
         _model.load_ckpt()
     return _model
