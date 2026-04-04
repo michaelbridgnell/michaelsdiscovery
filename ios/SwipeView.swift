@@ -272,9 +272,18 @@ struct SwipeView: View {
                     }
                     loading = false
                 }
-            } catch {
+            } catch APIError.server(let code) {
                 await MainActor.run {
-                    errorMessage = "Couldn't connect. Check your connection and try again."
+                    errorMessage = "Server error \(code). The AI may be out of memory — tap Try Again."
+                    loading = false
+                }
+            } catch APIError.unauthorized {
+                // @AppStorage already cleared the token; ContentView will show login.
+                await MainActor.run { loading = false }
+            } catch {
+                // Likely a timeout — CLAP cold-start can take 90-120s.
+                await MainActor.run {
+                    errorMessage = "Timed out waiting for AI server. Tap Try Again (it wakes up within 2 min)."
                     loading = false
                 }
             }
