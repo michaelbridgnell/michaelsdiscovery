@@ -3,10 +3,14 @@ import laion_clap
 from .music_api import search_tracks, download_preview
 import os
 
-print("Loading CLAP model...")
-model = laion_clap.CLAP_Module(enable_fusion=False)
-model.load_ckpt()
-print("CLAP ready\n")
+_model = None
+
+def _get_model():
+    global _model
+    if _model is None:
+        _model = laion_clap.CLAP_Module(enable_fusion=False)
+        _model.load_ckpt()
+    return _model
 
 def get_embedding(preview_url):
     filepath = os.path.join(os.path.dirname(__file__), "temp_preview.m4a")
@@ -14,7 +18,7 @@ def get_embedding(preview_url):
     
     print(f"File size: {os.path.getsize(filepath)} bytes")
     
-    embedding = model.get_audio_embedding_from_filelist(
+    embedding = _get_model().get_audio_embedding_from_filelist(
         [filepath], use_tensor=False
     )
     
