@@ -1,229 +1,234 @@
 import SwiftUI
 
-/// A little purple 3D dude with legs. He idles, walks, and occasionally
-/// turns to face the camera and looks directly at you.
+/// A quarter-note character: oval note-head face with two eyes,
+/// a stem, a thin flat foot-plate, and two thin legs.
+/// He idles, walks left/right, and occasionally turns to face the camera.
 struct WalkingGuy: View {
-    private enum WalkState { case idle, walking, facingCamera }
 
-    @State private var walkState: WalkState = .idle
-    @State private var leftLegAngle: Double = 5
-    @State private var rightLegAngle: Double = -5
-    @State private var bobY: CGFloat = 0
-    @State private var gazeX: CGFloat = 0
-    @State private var gazeY: CGFloat = 0
-    // Generation counter cancels stale callbacks
-    @State private var generation = 0
+    private enum State { case idle, walkingRight, walkingLeft, facingCamera }
 
-    // Layout constants
-    private let bW: CGFloat = 24   // body width
-    private let bH: CGFloat = 30   // body height
-    private let hR: CGFloat = 12   // head radius
-    private let lH: CGFloat = 14   // leg height
-    private let lW: CGFloat = 5.5  // leg width
+    // Layout
+    private let headW: CGFloat = 22
+    private let headH: CGFloat = 17
+    private let stemW: CGFloat = 2.5
+    private let stemH: CGFloat = 28
+    private let legW:  CGFloat = 2.5
+    private let legH:  CGFloat = 13
+    private let plateW: CGFloat = 20
+    private let plateH: CGFloat = 3
+
+    @SwiftUI.State private var state: State = .idle
+    @SwiftUI.State private var leftLeg:  Double = 8
+    @SwiftUI.State private var rightLeg: Double = -8
+    @SwiftUI.State private var bodyX:  CGFloat = 0
+    @SwiftUI.State private var bodyY:  CGFloat = 0
+    @SwiftUI.State private var gazeX:  CGFloat = 0.3
+    @SwiftUI.State private var gazeY:  CGFloat = 0
+    @SwiftUI.State private var gen = 0   // cancels stale callbacks
 
     var body: some View {
-        ZStack(alignment: .center) {
-            // ── Legs (rendered behind body) ─────────────────────────────
-            HStack(spacing: bW * 0.28) {
-                legView(angle: leftLegAngle)
-                legView(angle: rightLegAngle)
-            }
-            .offset(y: bH * 0.42 + lH * 0.38)
-            .zIndex(0)
+        ZStack(alignment: .bottom) {
 
-            // ── Body ─────────────────────────────────────────────────────
-            RoundedRectangle(cornerRadius: 10)
-                .fill(bodyGradient)
-                .frame(
-                    width: walkState == .facingCamera ? bW * 1.35 : bW,
-                    height: bH
-                )
-                // Specular highlight (left edge for side, centre for front)
-                .overlay(
-                    Capsule()
-                        .fill(Color.white.opacity(0.14))
-                        .frame(width: 5, height: bH * 0.52)
-                        .offset(x: walkState == .facingCamera ? 0 : -bW * 0.28, y: -bH * 0.08)
-                )
-                .zIndex(1)
+            // ── Stem (behind head) ─────────────────────────────────────
+            stemView
+                .offset(x: headW * 0.38, y: -(legH + plateH + headH * 0.5 + stemH * 0.5 - 2))
+                .zIndex(0)
 
-            // ── Head ─────────────────────────────────────────────────────
+            // ── Note head / face ──────────────────────────────────────
             headView
-                .offset(y: -(bH * 0.5 + hR * 0.9))
+                .offset(y: -(legH + plateH + headH * 0.5))
                 .zIndex(2)
+
+            // ── Legs ──────────────────────────────────────────────────
+            HStack(spacing: headW * 0.3) {
+                legView(angle: leftLeg)
+                legView(angle: rightLeg)
+            }
+            .offset(y: -(plateH + legH * 0.5))
+            .zIndex(1)
+
+            // ── Foot plate ────────────────────────────────────────────
+            Capsule()
+                .fill(Color(hex: "7c3aed"))
+                .frame(width: plateW, height: plateH)
+                .zIndex(1)
         }
-        .offset(y: bobY)
+        .offset(x: bodyX, y: bodyY)
         .onAppear {
             startBob()
-            scheduleNext(gen: generation)
-            scheduleGaze(gen: generation)
+            scheduleNext(g: gen)
+            scheduleGaze(g: gen)
         }
     }
 
-    // MARK: - Head
+    // MARK: - Sub-views
 
     var headView: some View {
         ZStack {
-            // Skull
-            Circle()
+            // Outer shadow/glow
+            Ellipse()
+                .fill(Color(hex: "a855f7").opacity(0.35))
+                .frame(width: headW + 6, height: headH + 5)
+                .blur(radius: 4)
+
+            // Head oval
+            Ellipse()
                 .fill(
-                    RadialGradient(
-                        colors: [Color(hex: "d8b4fe"), Color(hex: "6d28d9")],
-                        center: .topLeading,
-                        startRadius: 0,
-                        endRadius: hR * 2.2
+                    LinearGradient(
+                        colors: [Color(hex: "c084fc"), Color(hex: "6d28d9")],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
                     )
                 )
-                .frame(width: hR * 2, height: hR * 2)
-                .shadow(color: Color(hex: "a855f7").opacity(0.5), radius: 5, y: 2)
+                .frame(width: headW, height: headH)
 
-            // Eyes – front-facing shows two, side shows one
-            if walkState == .facingCamera {
-                HStack(spacing: hR * 0.52) {
-                    eyeView(eyeR: hR * 0.33)
-                    eyeView(eyeR: hR * 0.33)
+            // Specular highlight
+            Ellipse()
+                .fill(Color.white.opacity(0.18))
+                .frame(width: headW * 0.45, height: headH * 0.35)
+                .offset(x: -headW * 0.18, y: -headH * 0.18)
+
+            // Eyes — two when facing camera, one offset when side-on
+            if state == .facingCamera {
+                HStack(spacing: headW * 0.28) {
+                    eyeView(r: headH * 0.22)
+                    eyeView(r: headH * 0.22)
                 }
-                .offset(y: hR * 0.04)
+                .offset(y: headH * 0.04)
             } else {
-                eyeView(eyeR: hR * 0.35)
-                    .offset(x: hR * 0.22, y: hR * 0.0)
+                // Side-on: single eye slightly toward the "front"
+                let xOff: CGFloat = state == .walkingLeft ? -headW * 0.12 : headW * 0.12
+                HStack(spacing: headW * 0.22) {
+                    eyeView(r: headH * 0.20)
+                    eyeView(r: headH * 0.20)
+                }
+                .offset(x: xOff, y: headH * 0.04)
             }
         }
     }
 
-    func eyeView(eyeR: CGFloat) -> some View {
-        let pupilR = eyeR * 0.54
-        let maxGaze = eyeR * 0.26
+    func eyeView(r: CGFloat) -> some View {
+        let pupilR = r * 0.56
+        let maxG   = r * 0.24
         return ZStack {
-            Circle().fill(Color.white).frame(width: eyeR * 2, height: eyeR * 2)
+            Circle().fill(Color.white).frame(width: r * 2, height: r * 2)
             Circle()
                 .fill(Color(hex: "1a0533"))
                 .frame(width: pupilR * 2, height: pupilR * 2)
-                .offset(x: gazeX * maxGaze, y: gazeY * maxGaze)
-            // glint
+                .offset(x: gazeX * maxG, y: gazeY * maxG)
             Circle()
-                .fill(Color.white.opacity(0.65))
-                .frame(width: pupilR * 0.4, height: pupilR * 0.4)
-                .offset(x: gazeX * maxGaze + pupilR * 0.28,
-                        y: gazeY * maxGaze - pupilR * 0.28)
+                .fill(Color.white.opacity(0.7))
+                .frame(width: pupilR * 0.38, height: pupilR * 0.38)
+                .offset(x: gazeX * maxG + pupilR * 0.3,
+                        y: gazeY * maxG - pupilR * 0.3)
         }
     }
 
-    // MARK: - Leg
+    var stemView: some View {
+        RoundedRectangle(cornerRadius: stemW / 2)
+            .fill(Color(hex: "9333ea"))
+            .frame(width: stemW, height: stemH)
+    }
 
     func legView(angle: Double) -> some View {
-        RoundedRectangle(cornerRadius: lW / 2)
+        RoundedRectangle(cornerRadius: legW / 2)
             .fill(
                 LinearGradient(
                     colors: [Color(hex: "9333ea"), Color(hex: "3b0764")],
-                    startPoint: .top, endPoint: .bottom
-                )
+                    startPoint: .top, endPoint: .bottom)
             )
-            .frame(width: lW, height: lH)
+            .frame(width: legW, height: legH)
             .rotationEffect(.degrees(angle), anchor: .top)
-            .animation(.easeInOut(duration: 0.2), value: angle)
-    }
-
-    // MARK: - Body gradient helper
-
-    var bodyGradient: LinearGradient {
-        if walkState == .facingCamera {
-            return LinearGradient(
-                colors: [Color(hex: "a855f7"), Color(hex: "4c1d95")],
-                startPoint: .top, endPoint: .bottom
-            )
-        }
-        return LinearGradient(
-            colors: [Color(hex: "c084fc"), Color(hex: "581c87")],
-            startPoint: .topLeading, endPoint: .bottomTrailing
-        )
     }
 
     // MARK: - Bob
 
     func startBob() {
-        withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
-            bobY = -4
+        withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
+            bodyY = -3
         }
     }
 
     // MARK: - State machine
 
-    func scheduleNext(gen: Int) {
-        let delay = Double.random(in: 1.8...4.5)
+    func scheduleNext(g: Int) {
+        let delay = Double.random(in: 1.5...4.0)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            guard gen == generation else { return }
-            let roll = Int.random(in: 0...3)
-            switch roll {
-            case 0, 1: startWalking(gen: gen)
-            case 2:    turnToCamera(gen: gen)
-            default:   scheduleNext(gen: gen)   // stay idle longer
+            guard g == gen else { return }
+            switch Int.random(in: 0...3) {
+            case 0: startWalk(right: true,  g: g)
+            case 1: startWalk(right: false, g: g)
+            case 2: faceCamera(g: g)
+            default: scheduleNext(g: g)   // stay idle
             }
         }
     }
 
-    func startWalking(gen: Int) {
-        walkState = .walking
-        let steps = Int.random(in: 4...9)
-        walkStep(remaining: steps, gen: gen)
+    func startWalk(right: Bool, g: Int) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            state = right ? .walkingRight : .walkingLeft
+        }
+        let steps = Int.random(in: 5...10)
+        let dir: CGFloat = right ? 1 : -1
+        walkStep(remaining: steps, dir: dir, g: g)
     }
 
-    func walkStep(remaining: Int, gen: Int) {
-        guard gen == generation, walkState == .walking else {
-            finishWalking(gen: gen); return
+    func walkStep(remaining: Int, dir: CGFloat, g: Int) {
+        guard g == gen, state == .walkingRight || state == .walkingLeft else {
+            finishWalk(g: g); return
         }
-        if remaining == 0 { finishWalking(gen: gen); return }
-        let fwd: Double = 22
-        let bwd: Double = -22
-        let goLeft = (remaining % 2 == 0)
-        withAnimation(.easeInOut(duration: 0.18)) {
-            leftLegAngle  = goLeft ? fwd : bwd
-            rightLegAngle = goLeft ? bwd : fwd
+        if remaining == 0 { finishWalk(g: g); return }
+        let even = remaining % 2 == 0
+        withAnimation(.easeInOut(duration: 0.16)) {
+            leftLeg  = even ?  22 : -8
+            rightLeg = even ? -22 :  8
+            bodyX   += dir * 3.5
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            walkStep(remaining: remaining - 1, gen: gen)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            walkStep(remaining: remaining - 1, dir: dir, g: g)
         }
     }
 
-    func finishWalking(gen: Int) {
-        walkState = .idle
-        withAnimation(.spring()) {
-            leftLegAngle  = 5
-            rightLegAngle = -5
+    func finishWalk(g: Int) {
+        withAnimation(.spring(response: 0.3)) {
+            state    = .idle
+            leftLeg  = 8
+            rightLeg = -8
         }
-        scheduleNext(gen: gen)
+        scheduleNext(g: g)
     }
 
-    func turnToCamera(gen: Int) {
-        withAnimation(.easeInOut(duration: 0.22)) {
-            walkState = .facingCamera
-            gazeX = 0
-            gazeY = 0
+    func faceCamera(g: Int) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            state = .facingCamera
+            gazeX = 0; gazeY = 0
         }
-        let hold = Double.random(in: 0.9...2.2)
+        let hold = Double.random(in: 1.0...2.5)
         DispatchQueue.main.asyncAfter(deadline: .now() + hold) {
-            guard gen == generation else { return }
-            withAnimation(.easeInOut(duration: 0.22)) { walkState = .idle }
-            scheduleNext(gen: gen)
+            guard g == gen else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { state = .idle }
+            scheduleNext(g: g)
         }
     }
 
     // MARK: - Eye wander
 
-    func scheduleGaze(gen: Int) {
-        let delay = Double.random(in: 0.9...2.8)
+    func scheduleGaze(g: Int) {
+        let delay = Double.random(in: 0.8...2.5)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            guard gen == generation else { return }
-            if walkState == .facingCamera {
-                // When facing camera, look slightly toward viewer centre
-                withAnimation(.easeOut(duration: 0.15)) { gazeX = 0; gazeY = -0.2 }
-            } else {
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    gazeX = CGFloat.random(in: -1...1)
-                    gazeY = CGFloat.random(in: -0.7...0.7)
+            guard g == gen else { return }
+            withAnimation(.easeInOut(duration: 0.25)) {
+                if state == .facingCamera {
+                    gazeX = CGFloat.random(in: -0.4...0.4)
+                    gazeY = CGFloat.random(in: -0.3...0.3)
+                } else {
+                    gazeX = state == .walkingRight
+                        ? CGFloat.random(in: 0...1)
+                        : CGFloat.random(in: -1...0)
+                    gazeY = CGFloat.random(in: -0.6...0.6)
                 }
             }
-            scheduleGaze(gen: gen)
+            scheduleGaze(g: g)
         }
     }
 }
