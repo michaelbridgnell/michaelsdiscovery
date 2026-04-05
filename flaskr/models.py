@@ -75,6 +75,7 @@ class Track(db.Model):
     preview_url = db.Column(db.String(255), nullable=False)
     album_id = db.Column(db.Integer, db.ForeignKey('album.id'), nullable=False)
     embedding = db.Column(db.LargeBinary, nullable=True)
+    artwork_url = db.Column(db.String(500), nullable=True)
 
     def get_vector(self):
         if self.embedding is None:

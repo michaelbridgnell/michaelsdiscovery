@@ -6,18 +6,21 @@ struct ProfileView: View {
     @AppStorage("onboarding_done") var onboardingDone = false
     @AppStorage("username") var storedUsername = ""
 
+    @State private var selectedTab = 0   // 0 = Friends, 1 = Taste
     @State private var likedTracks: [FriendTasteTrack] = []
+    @State private var friends: [Friend] = []
     @State private var friendCount = 0
     @State private var postCount = 0
     @State private var loading = true
-    @State private var showLogoutConfirm = false
+    @State private var showLogoutAlert = false
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 0) {
-                    // Header
+
+                    // ── Avatar + name ────────────────────────────────────
                     VStack(spacing: 12) {
                         ZStack {
                             Circle()
@@ -40,82 +43,38 @@ struct ProfileView: View {
 
                         HStack(spacing: 12) {
                             statPill(value: "\(likedTracks.count)", label: "Liked")
-                            statPill(value: "\(friendCount)", label: "Friends")
-                            statPill(value: "\(postCount)", label: "Posts")
+                            statPill(value: "\(friendCount)",       label: "Friends")
+                            statPill(value: "\(postCount)",         label: "Posts")
                         }
                         .padding(.top, 4)
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 20)
 
-                    // Liked songs
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("YOUR TASTE")
-                            .foregroundColor(.gray)
-                            .font(.caption.bold())
-                            .padding(.horizontal)
+                    // ── Segment: Friends | Taste ─────────────────────────
+                    HStack(spacing: 0) {
+                        segBtn("Friends", index: 0)
+                        segBtn("Taste",   index: 1)
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom, 16)
 
-                        if loading {
-                            HStack {
-                                Spacer()
-                                ProgressView().tint(.white).padding(32)
-                                Spacer()
-                            }
-                        } else if likedTracks.isEmpty {
-                            VStack(spacing: 10) {
-                                Image(systemName: "heart.slash")
-                                    .font(.system(size: 32))
-                                    .foregroundColor(Color(hex: "a855f7").opacity(0.5))
-                                Text("No likes yet — start swiping!")
-                                    .foregroundColor(.gray)
-                                    .font(.subheadline)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(32)
-                        } else {
-                            ForEach(likedTracks) { track in
-                                HStack(spacing: 14) {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color(hex: "2a1040"))
-                                        Image(systemName: "music.note")
-                                            .foregroundColor(Color(hex: "a855f7"))
-                                            .font(.system(size: 14))
-                                    }
-                                    .frame(width: 42, height: 42)
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(track.title)
-                                            .foregroundColor(.white)
-                                            .fontWeight(.semibold)
-                                            .lineLimit(1)
-                                        Text(track.artist)
-                                            .foregroundColor(Color(hex: "b084f5"))
-                                            .font(.caption)
-                                            .lineLimit(1)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                                .background(Color.white.opacity(0.05))
-                                .cornerRadius(12)
-                                .padding(.horizontal)
-                            }
-                        }
+                    if selectedTab == 0 {
+                        friendsSection
+                    } else {
+                        tasteSection
                     }
 
-                    // Logout
-                    Button(action: { showLogoutConfirm = true }) {
+                    // ── Logout ───────────────────────────────────────────
+                    Button(action: { showLogoutAlert = true }) {
                         HStack {
                             Image(systemName: "rectangle.portrait.and.arrow.right")
-                            Text("Log Out")
-                                .fontWeight(.semibold)
+                            Text("Log Out").fontWeight(.semibold)
                         }
-                        .foregroundColor(.red.opacity(0.8))
+                        .foregroundColor(.red.opacity(0.85))
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Color.white.opacity(0.05))
+                        .background(Color.red.opacity(0.08))
                         .cornerRadius(12)
                         .padding(.horizontal)
                     }
@@ -124,42 +83,139 @@ struct ProfileView: View {
                 }
             }
         }
-        .confirmationDialog("Log out?", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
+        .alert("Log out of Sonik?", isPresented: $showLogoutAlert) {
             Button("Log Out", role: .destructive) {
-                token = ""
-                onboardingDone = false
-                storedUsername = ""
-                userId = 0
+                token = ""; onboardingDone = false
+                storedUsername = ""; userId = 0
             }
             Button("Cancel", role: .cancel) {}
         }
-        .onAppear { loadLikes() }
+        .onAppear { loadAll() }
     }
+
+    // MARK: - Segments
+
+    func segBtn(_ label: String, index: Int) -> some View {
+        Button(action: { selectedTab = index }) {
+            Text(label)
+                .fontWeight(.semibold).font(.subheadline)
+                .foregroundColor(selectedTab == index ? .white : .gray)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(selectedTab == index
+                    ? Color(hex: "7c3aed").opacity(0.55)
+                    : Color.clear)
+                .cornerRadius(10)
+        }
+    }
+
+    // MARK: - Friends section
+
+    var friendsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if loading {
+                HStack { Spacer(); ProgressView().tint(.white).padding(32); Spacer() }
+            } else if friends.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "person.2")
+                        .font(.system(size: 36))
+                        .foregroundColor(Color(hex: "a855f7").opacity(0.5))
+                    Text("No friends yet")
+                        .foregroundColor(.gray)
+                    Text("Add friends in the Community tab")
+                        .foregroundColor(.gray.opacity(0.6))
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(32)
+            } else {
+                ForEach(friends) { friend in
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(Color(hex: "2a1040"))
+                                .frame(width: 44, height: 44)
+                            Text(friend.username.prefix(1).uppercased())
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(Color(hex: "a855f7"))
+                        }
+                        Text(friend.username)
+                            .foregroundColor(.white)
+                            .fontWeight(.semibold)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+
+    // MARK: - Taste section
+
+    var tasteSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if loading {
+                HStack { Spacer(); ProgressView().tint(.white).padding(32); Spacer() }
+            } else if likedTracks.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "heart.slash")
+                        .font(.system(size: 32))
+                        .foregroundColor(Color(hex: "a855f7").opacity(0.5))
+                    Text("No likes yet — start swiping!")
+                        .foregroundColor(.gray).font(.subheadline)
+                }
+                .frame(maxWidth: .infinity).padding(32)
+            } else {
+                ForEach(likedTracks) { track in
+                    HStack(spacing: 14) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8).fill(Color(hex: "2a1040"))
+                            Image(systemName: "music.note")
+                                .foregroundColor(Color(hex: "a855f7"))
+                                .font(.system(size: 14))
+                        }
+                        .frame(width: 42, height: 42)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(track.title)
+                                .foregroundColor(.white).fontWeight(.semibold).lineLimit(1)
+                            Text(track.artist)
+                                .foregroundColor(Color(hex: "b084f5")).font(.caption).lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                }
+            }
+        }
+    }
+
+    // MARK: - Helpers
 
     func statPill(value: String, label: String) -> some View {
         VStack(spacing: 2) {
-            Text(value)
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white)
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.gray)
+            Text(value).font(.system(size: 20, weight: .bold)).foregroundColor(.white)
+            Text(label).font(.caption).foregroundColor(.gray)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(Color.white.opacity(0.06))
-        .cornerRadius(12)
+        .padding(.horizontal, 20).padding(.vertical, 10)
+        .background(Color.white.opacity(0.06)).cornerRadius(12)
     }
 
-    func loadLikes() {
+    func loadAll() {
         loading = true
         Task {
-            async let likes = APIService.shared.getMyLikes()
-            async let friends = APIService.shared.getFriends()
-            async let posts = APIService.shared.getMyPostCount()
+            async let likes   = APIService.shared.getMyLikes()
+            async let fr      = APIService.shared.getFriends()
+            async let posts   = APIService.shared.getMyPostCount()
             likedTracks = (try? await likes) ?? []
-            friendCount = (try? await friends)?.count ?? 0
-            postCount = (try? await posts) ?? 0
+            friends     = (try? await fr) ?? []
+            friendCount = friends.count
+            postCount   = (try? await posts) ?? 0
             await MainActor.run { loading = false }
         }
     }

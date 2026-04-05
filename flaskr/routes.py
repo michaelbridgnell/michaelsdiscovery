@@ -328,7 +328,8 @@ def fetch_recommendations(current_user, search_term):
         return jsonify([])
 
     songs = [{"id": t.id, "title": t.title, "artist": t.artist,
-              "preview_url": t.preview_url, "vector": t.get_vector()}
+              "preview_url": t.preview_url, "artwork_url": t.artwork_url or "",
+              "vector": t.get_vector()}
              for t in tracks]
 
     songs_with_vec = [s for s in songs if s["vector"] is not None]
@@ -342,16 +343,17 @@ def fetch_recommendations(current_user, search_term):
         results     = hybrid.recommend(user_key, songs_with_vec, top_k=10)
         payload     = [
             {"id": s["id"], "title": s["title"], "artist": s["artist"],
-             "preview_url": s["preview_url"], "score": round(score, 3)}
+             "preview_url": s["preview_url"], "artwork_url": s.get("artwork_url", ""),
+             "score": round(score, 3)}
             for score, s in results
         ]
     else:
-        # CLAP not available on this tier — return shuffled tracks so Discover still works
         shuffled = list(songs)
         random.shuffle(shuffled)
         payload = [
             {"id": s["id"], "title": s["title"], "artist": s["artist"],
-             "preview_url": s["preview_url"], "score": 0.5}
+             "preview_url": s["preview_url"], "artwork_url": s.get("artwork_url", ""),
+             "score": 0.5}
             for s in shuffled[:10]
         ]
 

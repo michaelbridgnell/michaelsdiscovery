@@ -7,19 +7,22 @@ struct WalkingGuy: View {
     }
 
     private let bodyR:  CGFloat = 20
+    private let stemH:  CGFloat = 26
+    private let flagH:  CGFloat = 15
+    private let flagW:  CGFloat = 13
+    private let eyeR:   CGFloat = 7
     private let legH:   CGFloat = 22
     private let legW:   CGFloat = 4.5
     private let footW:  CGFloat = 11
-    private let stemH:  CGFloat = 26
-    private let eyeR:   CGFloat = 7    // big cartoon eyes
-    private let maxX:   CGFloat = 38
+    private let stemW:  CGFloat = 3.5
+    private let maxX:   CGFloat = 28
 
     @SwiftUI.State private var guyState: GuyState = .idle
     @SwiftUI.State private var gen = 0
 
     @SwiftUI.State private var posX:  CGFloat = 0
     @SwiftUI.State private var bobY:  CGFloat = 0
-    @SwiftUI.State private var turnT: CGFloat = 1   // 1=front 0=side
+    @SwiftUI.State private var turnT: CGFloat = 1   // 1=front, 0=side
 
     @SwiftUI.State private var legL: Double = 0
     @SwiftUI.State private var legR: Double = 0
@@ -31,18 +34,12 @@ struct WalkingGuy: View {
 
     @SwiftUI.State private var stemSway: Double = 0
 
-    // Canvas is wide enough that character never leaves it when walking
-    private var canvasW: CGFloat { maxX * 2 + bodyR * 2 + 24 }
-    private var canvasH: CGFloat { stemH + 16 + eyeR * 2 + bodyR * 2 + legH + footW * 0.4 + 4 }
-
     var body: some View {
         ZStack(alignment: .bottom) {
-            // character moves WITHIN the canvas — canvas itself never shifts,
-            // so no clipping no matter how wide the parent frame is
             character
                 .offset(x: posX, y: bobY)
         }
-        .frame(width: canvasW, height: canvasH)
+        .frame(width: maxX * 2 + 100, height: 106)
         .onAppear {
             startBob()
             startStemSway()
@@ -52,95 +49,107 @@ struct WalkingGuy: View {
         }
     }
 
-    // MARK: - Whole character
+    // MARK: - Whole character (ZStack, body center = origin)
 
     var character: some View {
-        VStack(spacing: 0) {
-            stemView
-                .rotationEffect(.degrees(stemSway))
-                .offset(x: bodyR * 0.38 * turnT)
-                .padding(.bottom, -2)
+        ZStack {
+            // Body
+            bodyCircle
 
-            // Eyes sit ON TOP — overlap down into circle
-            eyeRow
-                .padding(.bottom, -eyeR * 0.85)
+            // Left eye
+            singleEye
+                .offset(x: -eyeR * 1.1 * turnT,
+                        y: -(bodyR + eyeR * 0.45))
+                .opacity(turnT > 0.3 ? Double((turnT - 0.3) / 0.7) : 0)
                 .zIndex(3)
 
-            bodyCircle
+            // Right eye
+            singleEye
+                .offset(x: eyeR * 0.5 * turnT,
+                        y: -(bodyR + eyeR * 0.55))
+                .zIndex(3)
+
+            // Stem
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color(hex: "5b21b6"))
+                .frame(width: stemW, height: stemH)
+                .rotationEffect(.degrees(stemSway))
+                .offset(x: bodyR * 0.65 * turnT,
+                        y: -(bodyR * 0.2 + stemH * 0.5))
                 .zIndex(2)
 
-            legs
-                .padding(.top, -1)
-                .zIndex(1)
-        }
-    }
-
-    // MARK: - Stem
-
-    var stemView: some View {
-        ZStack(alignment: .bottom) {
+            // Flag
+            let stemTopX = bodyR * 0.65 * turnT + stemW * 0.5
+            let stemTopY = -(bodyR * 0.2 + stemH)
             Canvas { ctx, size in
                 var p = Path()
                 p.move(to: .init(x: 0, y: 0))
-                p.addCurve(to:       .init(x: size.width, y: size.height * 0.45),
-                           control1: .init(x: size.width * 1.15, y: 0),
-                           control2: .init(x: size.width * 1.15, y: size.height * 0.22))
+                p.addCurve(to:       .init(x: size.width, y: size.height * 0.55),
+                           control1: .init(x: size.width * 1.1, y: 0),
+                           control2: .init(x: size.width * 1.1, y: size.height * 0.28))
                 p.addCurve(to:       .init(x: 0, y: size.height),
-                           control1: .init(x: size.width * 0.65, y: size.height * 0.72),
+                           control1: .init(x: size.width * 0.7, y: size.height * 0.72),
                            control2: .init(x: 0, y: size.height * 0.88))
-                ctx.fill(p, with: .color(Color(hex: "6d28d9")))
+                ctx.fill(p, with: .color(Color(hex: "5b21b6")))
             }
-            .frame(width: 12, height: 15)
-            .offset(x: 6 * turnT)
+            .frame(width: flagW, height: flagH)
+            .offset(x: stemTopX + flagW * 0.5,
+                    y: stemTopY + flagH * 0.5)
             .opacity(Double(turnT))
+            .zIndex(2)
 
-            RoundedRectangle(cornerRadius: 2)
-                .fill(Color(hex: "6d28d9"))
-                .frame(width: 3.5, height: stemH)
-        }
-        .frame(width: 18, height: stemH + 15)
-    }
-
-    // MARK: - Eyes
-
-    var eyeRow: some View {
-        HStack(spacing: eyeR * 1.3 * turnT + eyeR * 0.1) {
-            // Left eye fades out — no x-squish, just opacity
-            if turnT > 0.3 {
-                singleEye
-                    .opacity(Double((turnT - 0.3) / 0.7))
+            // Legs
+            HStack(spacing: max(2, bodyR * 0.45 * turnT)) {
+                legAndFoot(angle: legL)
+                legAndFoot(angle: legR)
             }
-            singleEye
+            .offset(y: bodyR + 1)
+            .zIndex(1)
+        }
+        .frame(width: 90, height: 96)
+    }
+
+    // MARK: - Body
+
+    var bodyCircle: some View {
+        ZStack {
+            Ellipse()
+                .fill(Color(hex: "6d28d9"))
+                .frame(width: bodyR * 2 * turnT + legW,
+                       height: bodyR * 2)
+
+            Ellipse()
+                .fill(Color(hex: "9d5aff").opacity(0.5))
+                .frame(width: bodyR * 1.1 * turnT,
+                       height: bodyR * 0.75)
+                .offset(x: -bodyR * 0.25 * turnT, y: -bodyR * 0.38)
         }
     }
+
+    // MARK: - Eye
 
     var singleEye: some View {
         ZStack {
-            // White sclera
             Circle()
                 .fill(Color.white)
                 .frame(width: eyeR * 2, height: eyeR * 2)
 
-            // Solid iris — no gradient
             Circle()
                 .fill(Color(hex: "5b21b6"))
                 .frame(width: eyeR * 1.25, height: eyeR * 1.25)
                 .offset(x: gazeX * eyeR * 0.3, y: gazeY * eyeR * 0.3)
 
-            // Pupil
             Circle()
                 .fill(Color(hex: "0d0010"))
                 .frame(width: eyeR * 0.6 * pupilD, height: eyeR * 0.6 * pupilD)
                 .offset(x: gazeX * eyeR * 0.3, y: gazeY * eyeR * 0.3)
 
-            // Bold glint — cartoon feel
             Circle()
                 .fill(Color.white)
                 .frame(width: eyeR * 0.38, height: eyeR * 0.38)
                 .offset(x: gazeX * eyeR * 0.3 + eyeR * 0.3,
                         y: gazeY * eyeR * 0.3 - eyeR * 0.32)
 
-            // Eyelid blink
             Rectangle()
                 .fill(Color.white)
                 .frame(width: eyeR * 2.2, height: eyeR * 2.2)
@@ -151,33 +160,7 @@ struct WalkingGuy: View {
         .clipShape(Circle())
     }
 
-    // MARK: - Body
-
-    var bodyCircle: some View {
-        ZStack {
-            // Flat body — no blur, no glow
-            Ellipse()
-                .fill(Color(hex: "6d28d9"))
-                .frame(width: bodyR * 2 * turnT + legW,
-                       height: bodyR * 2)
-
-            // Simple top highlight (gives shape without looking digital)
-            Ellipse()
-                .fill(Color(hex: "9d5aff").opacity(0.5))
-                .frame(width: bodyR * 1.1 * turnT,
-                       height: bodyR * 0.75)
-                .offset(x: -bodyR * 0.25 * turnT, y: -bodyR * 0.38)
-        }
-    }
-
     // MARK: - Legs + feet
-
-    var legs: some View {
-        HStack(spacing: bodyR * 0.45 * turnT) {
-            legAndFoot(angle: legL)
-            legAndFoot(angle: legR)
-        }
-    }
 
     func legAndFoot(angle: Double) -> some View {
         VStack(spacing: 0) {
@@ -232,9 +215,11 @@ struct WalkingGuy: View {
 
     func walkStep(remaining: Int, dir: CGFloat, g: Int) {
         guard g == gen else { return }
-        if remaining == 0 { finishWalk(g: g); return }
+        let newX = posX + dir * 5
+        if remaining == 0 || (dir > 0 && newX > maxX) || (dir < 0 && newX < -maxX) {
+            finishWalk(g: g); return
+        }
         let even = remaining % 2 == 0
-        let newX = min(maxX, max(-maxX, posX + dir * 5))
         withAnimation(.easeInOut(duration: 0.16)) {
             legL = even ?  28 : -8
             legR = even ? -28 :  8
@@ -266,11 +251,10 @@ struct WalkingGuy: View {
 
     func turnSide(g: Int) {
         guyState = .turningSide
-        // 0.18 = thin oval side profile (not a slit — that looked terrible)
         withAnimation(.easeInOut(duration: 0.35)) { turnT = 0.18 }
         DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.8...1.6)) {
             guard g == gen else { return }
-            withAnimation(.easeInOut(duration: 0.3)) { turnT = 1; guyState = .idle }
+            withAnimation(.easeInOut(duration: 0.30)) { turnT = 1; guyState = .idle }
             scheduleNext(g: g)
         }
     }

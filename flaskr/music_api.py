@@ -39,11 +39,15 @@ def search_tracks(query, limit=10):
 
         existing_track = Track.query.filter_by(preview_url=item["previewUrl"]).first()
         if existing_track is None:
+            artwork = item.get("artworkUrl100", "")
+            if artwork:
+                artwork = artwork.replace("100x100bb", "400x400bb")
             new_track = Track(
                 title=item["trackName"],
                 artist=item["artistName"],
                 preview_url=item["previewUrl"],
                 album_id=album_obj.id,
+                artwork_url=artwork or None,
             )
             if _CLAP_ENABLED:
                 try:

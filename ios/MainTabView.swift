@@ -41,5 +41,7 @@ struct MainTabView: View {
                 .tabItem { Label("Profile",    systemImage: "person.crop.circle") }
         }
         .tint(Color(hex: "a855f7"))
+        .toolbarBackground(Color(hex: "0f0520"), for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
     }
 }

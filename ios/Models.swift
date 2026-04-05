@@ -11,6 +11,7 @@ struct Track: Codable, Identifiable {
     let title: String
     let artist: String
     let preview_url: String
+    let artwork_url: String?
     var score: Double?
 }
 

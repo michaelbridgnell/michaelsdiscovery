@@ -4,6 +4,7 @@ struct AuthView: View {
     @AppStorage("auth_token") var token = ""
     @AppStorage("user_id") var userId = 0
     @AppStorage("username") var storedUsername = ""
+    @AppStorage("onboarding_done") var onboardingDone = false
 
     @State private var email = ""
     @State private var username = ""
@@ -18,7 +19,7 @@ struct AuthView: View {
     @State private var showTerms = false
 
     // Real-time username availability
-    private enum FieldStatus { case idle, checking, available, taken, invalid }
+    enum FieldStatus { case idle, checking, available, taken, invalid }
     @State private var usernameStatus: FieldStatus = .idle
     @State private var usernameCheckTask: Task<Void, Never>? = nil
     @State private var emailStatus: FieldStatus = .idle
@@ -316,6 +317,7 @@ struct AuthView: View {
                     token = response.token
                     userId = response.user_id
                     storedUsername = response.username
+                    if !isLogin { onboardingDone = false }  // new account always sees onboarding
                 }
             } catch APIError.server(let code) {
                 await MainActor.run {
