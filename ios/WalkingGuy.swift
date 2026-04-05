@@ -1,383 +1,332 @@
 import SwiftUI
 
-/// A music-note character with real personality:
-/// - Round hollow/filled body with inner glow and rim light
-/// - Eyes with multi-ring iris, animated pupil dilation, random blinks
-/// - Squash-and-stretch on landing, anticipation dip before walks
-/// - Stem sways gently
-/// - Occasionally turns to face you and holds your gaze
-/// - Eyes wander independently; sometimes go subtly wrong
+/// Music note character matching the hand-drawn sketch:
+/// Large circle body, eyes poking above the top of the circle,
+/// stem rising between the eyes, simple stick legs with small feet.
+/// Can turn sideways (circle squishes to thin oval = 3D effect).
 struct WalkingGuy: View {
 
-    private enum GuyState { case idle, anticipate, walkingRight, walkingLeft, facingCamera, landing }
-    private enum NoteStyle { case quarter, whole, half }
+    private enum GuyState {
+        case idle, walkingRight, walkingLeft, facingCamera, turningLeft, turningRight
+    }
 
-    // ── Layout ──────────────────────────────────────────────────────
-    private let bodyR:  CGFloat = 15
-    private let legW:   CGFloat = 2.8
-    private let legH:   CGFloat = 13
-    private let stemW:  CGFloat = 2.4
-    private let stemH:  CGFloat = 24
-    private let eyeR:   CGFloat = 4.8
-    private let maxX:   CGFloat = 38
+    // ── Sizes (everything derived from bodyR) ────────────────────────
+    private let bodyR:  CGFloat = 18   // main circle radius
+    private let legH:   CGFloat = 16   // leg length
+    private let legW:   CGFloat = 2.6  // leg thickness
+    private let footW:  CGFloat = 7    // horizontal foot line width
+    private let stemH:  CGFloat = 22   // stem above head
+    private let eyeR:   CGFloat = 4.2  // eye radius
+    private let maxX:   CGFloat = 44   // walk boundary
 
-    // ── State ────────────────────────────────────────────────────────
-    @SwiftUI.State private var guyState:  GuyState  = .idle
-    @SwiftUI.State private var noteStyle: NoteStyle = .quarter
+    @SwiftUI.State private var guyState: GuyState = .idle
     @SwiftUI.State private var gen = 0
 
-    // Walk
-    @SwiftUI.State private var bodyX:     CGFloat = 0
-    @SwiftUI.State private var leftLeg:   Double  = 5
-    @SwiftUI.State private var rightLeg:  Double  = -5
+    // Position / transform
+    @SwiftUI.State private var posX:   CGFloat = 0
+    @SwiftUI.State private var bobY:   CGFloat = 0
+    // 3D turn: 1 = full front, 0 = sideways (body squishes to slit)
+    @SwiftUI.State private var turnT:  CGFloat = 1
 
-    // Bob / squash
-    @SwiftUI.State private var bodyY:     CGFloat = 0
-    @SwiftUI.State private var scaleX:    CGFloat = 1
-    @SwiftUI.State private var scaleY:    CGFloat = 1
-
-    // Stem sway
-    @SwiftUI.State private var stemAngle: Double  = 0
+    // Walk legs
+    @SwiftUI.State private var legLAngle: Double = 0
+    @SwiftUI.State private var legRAngle: Double = 0
 
     // Eyes
-    @SwiftUI.State private var gazeX:     CGFloat = 0
-    @SwiftUI.State private var gazeY:     CGFloat = 0
-    @SwiftUI.State private var pupilScale:CGFloat = 1      // dilation
-    @SwiftUI.State private var blinkT:    CGFloat = 1      // 1=open 0=closed
-    @SwiftUI.State private var leftEyeExtraOffset:  CGSize = .zero
-    @SwiftUI.State private var rightEyeExtraOffset: CGSize = .zero
+    @SwiftUI.State private var gazeX:   CGFloat = 0
+    @SwiftUI.State private var gazeY:   CGFloat = 0
+    @SwiftUI.State private var blinkT:  CGFloat = 1   // 1=open, 0=shut
+    @SwiftUI.State private var pupilD:  CGFloat = 1   // dilation multiplier
 
-    var isFilled: Bool { noteStyle != .whole }
-    var facing: Bool   { guyState == .facingCamera }
+    // Stem sway
+    @SwiftUI.State private var stemSway: Double = 0
 
-    // ── Body ─────────────────────────────────────────────────────────
     var body: some View {
+        // Total canvas: wide enough for walk range, tall enough for stem+eyes
         ZStack(alignment: .bottom) {
-
-            // Stem + flag
-            stemAndFlag
-                .rotationEffect(.degrees(stemAngle), anchor: .bottom)
-                .offset(x: bodyR * 0.52,
-                        y: -(legH + bodyR * 2 + stemH * 0.5 - bodyR * 0.05))
-                .zIndex(0)
-
-            // Body
-            bodyCircle
-                .scaleEffect(x: scaleX, y: scaleY, anchor: .bottom)
-                .offset(y: -(legH + bodyR))
-                .zIndex(2)
-
-            // Legs
-            HStack(spacing: bodyR * 0.55) {
-                legView(angle: leftLeg)
-                legView(angle: rightLeg)
-            }
-            .offset(y: -legH * 0.5)
-            .zIndex(1)
-
-            // Foot plate
-            Capsule()
-                .fill(Color(hex: "6d28d9"))
-                .frame(width: bodyR * 1.4, height: 2.5)
-                .zIndex(1)
+            characterStack
         }
-        .offset(x: bodyX, y: bodyY)
+        .frame(width: maxX * 2 + bodyR * 2 + 20,
+               height: bodyR * 2 + stemH + eyeR * 2 + legH + 6)
+        .offset(x: posX, y: bobY)
         .onAppear {
             startBob()
-            swaySystem()
+            startStemSway()
             scheduleNext(g: gen)
             scheduleGaze(g: gen)
             scheduleBlink(g: gen)
         }
     }
 
-    // MARK: - Body circle
+    // MARK: - Full stack
 
-    var bodyCircle: some View {
-        ZStack {
-            // ── Outer glow ──────────────────────────────────────────
-            Circle()
-                .fill(Color(hex: "a855f7").opacity(isFilled ? 0.28 : 0.15))
-                .frame(width: bodyR * 2 + 10, height: bodyR * 2 + 10)
-                .blur(radius: 7)
+    var characterStack: some View {
+        VStack(spacing: 0) {
 
-            // ── Main fill ───────────────────────────────────────────
-            Circle()
-                .fill(isFilled
-                    ? AnyShapeStyle(LinearGradient(
-                        colors: [Color(hex: "d8b4fe"), Color(hex: "7c3aed"), Color(hex: "3b0764")],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing))
-                    : AnyShapeStyle(Color(hex: "0e0618")))
-                .frame(width: bodyR * 2, height: bodyR * 2)
+            // ── Stem + flag (above head) ─────────────────────────────
+            stemView
+                .rotationEffect(.degrees(stemSway))
+                .offset(x: bodyR * turnT * 0.4)   // stem shifts with turn
+                .padding(.bottom, -2)
 
-            // ── Rim / stroke ─────────────────────────────────────────
-            Circle()
-                .stroke(
-                    LinearGradient(
-                        colors: [Color(hex: "e9d5ff"), Color(hex: "7c3aed")],
-                        startPoint: .topLeading, endPoint: .bottomTrailing),
-                    lineWidth: isFilled ? 0 : 2.5
-                )
-                .frame(width: bodyR * 2, height: bodyR * 2)
+            // ── Eyes (sit ON TOP of circle, poke above it) ───────────
+            eyeRow
+                .padding(.bottom, -eyeR * 0.8)    // overlap down into circle
+                .zIndex(3)
 
-            // ── Inner shadow ring (depth) ─────────────────────────────
-            if isFilled {
-                Circle()
-                    .stroke(Color(hex: "3b0764").opacity(0.5), lineWidth: 5)
-                    .frame(width: bodyR * 2 - 3, height: bodyR * 2 - 3)
-                    .blur(radius: 2)
-            }
+            // ── Body circle (squishes sideways for 3D turn) ──────────
+            bodyView
+                .zIndex(2)
 
-            // ── Top specular highlight ───────────────────────────────
-            Ellipse()
-                .fill(
-                    LinearGradient(
-                        colors: [Color.white.opacity(isFilled ? 0.35 : 0.12), Color.clear],
-                        startPoint: .top, endPoint: .bottom)
-                )
-                .frame(width: bodyR * 0.9, height: bodyR * 0.55)
-                .offset(x: -bodyR * 0.2, y: -bodyR * 0.45)
-                .blur(radius: 1)
-
-            // ── Eyes sitting on top of the circle ──────────────────
-            HStack(spacing: eyeR * 1.15) {
-                eyeView(extra: leftEyeExtraOffset)
-                eyeView(extra: rightEyeExtraOffset)
-            }
-            .offset(y: -bodyR * 0.52)
+            // ── Legs ─────────────────────────────────────────────────
+            legsView
+                .padding(.top, -2)
+                .zIndex(1)
         }
-    }
-
-    // MARK: - Eye
-
-    func eyeView(extra: CGSize) -> some View {
-        let pupilR  = eyeR * 0.48
-        let irisR   = eyeR * 0.75
-        let maxG    = eyeR * 0.2
-        let bg      = isFilled ? Color.white       : Color(hex: "1a1035")
-        let irisCol = isFilled ? Color(hex: "6d28d9") : Color(hex: "c084fc")
-        let pupilCol = isFilled ? Color(hex: "0e0618") : Color.white
-
-        return ZStack {
-            // Sclera
-            Circle()
-                .fill(bg)
-                .frame(width: eyeR * 2, height: eyeR * 2)
-
-            // Iris — multi-ring for texture
-            Circle()
-                .fill(irisCol)
-                .frame(width: irisR * 2, height: irisR * 2)
-                .offset(x: gazeX * maxG, y: gazeY * maxG)
-
-            // Iris inner ring (texture)
-            Circle()
-                .stroke(irisCol.opacity(0.4), lineWidth: 1)
-                .frame(width: irisR * 1.3, height: irisR * 1.3)
-                .offset(x: gazeX * maxG, y: gazeY * maxG)
-
-            // Pupil — scales with dilation
-            Circle()
-                .fill(pupilCol)
-                .frame(width: pupilR * 2 * pupilScale, height: pupilR * 2 * pupilScale)
-                .offset(x: gazeX * maxG, y: gazeY * maxG)
-
-            // Glint 1 (main)
-            Circle()
-                .fill(Color.white.opacity(0.85))
-                .frame(width: pupilR * 0.5, height: pupilR * 0.5)
-                .offset(x: gazeX * maxG + pupilR * 0.35,
-                        y: gazeY * maxG - pupilR * 0.35)
-
-            // Glint 2 (small secondary)
-            Circle()
-                .fill(Color.white.opacity(0.4))
-                .frame(width: pupilR * 0.22, height: pupilR * 0.22)
-                .offset(x: gazeX * maxG - pupilR * 0.3,
-                        y: gazeY * maxG + pupilR * 0.25)
-
-            // Eyelid blink — scaleY closes from top
-            Rectangle()
-                .fill(bg)
-                .frame(width: eyeR * 2.2, height: eyeR * 2.2)
-                .scaleEffect(y: 1 - blinkT, anchor: .top)
-                .clipShape(Circle().scale(1.1))
-        }
-        .frame(width: eyeR * 2, height: eyeR * 2)
-        .clipShape(Circle())
-        .offset(extra)
     }
 
     // MARK: - Stem
 
-    var stemAndFlag: some View {
-        VStack(spacing: 0) {
-            if noteStyle == .quarter {
-                flagCanvas
-                    .frame(width: 11, height: 12)
-                    .offset(x: 5.5, y: 0.5)
-            }
-            if noteStyle == .half {
-                // Half-note: just a small serif at top
-                Capsule()
-                    .fill(Color(hex: "9333ea"))
-                    .frame(width: 6, height: 3)
-                    .offset(x: 2)
-            }
-            RoundedRectangle(cornerRadius: 1.2)
-                .fill(
-                    LinearGradient(
-                        colors: [Color(hex: "e9d5ff"), Color(hex: "7c3aed")],
-                        startPoint: .top, endPoint: .bottom)
-                )
-                .frame(width: stemW, height: stemH)
+    var stemView: some View {
+        ZStack(alignment: .bottom) {
+            // Flag curl (quarter note)
+            flagCurl
+                .frame(width: 10, height: 13)
+                .offset(x: stemH * 0.22 * CGFloat(turnT))  // hides when sideways
+
+            // Stem bar
+            RoundedRectangle(cornerRadius: 1.3)
+                .fill(LinearGradient(
+                    colors: [Color(hex: "e9d5ff"), Color(hex: "9333ea")],
+                    startPoint: .top, endPoint: .bottom))
+                .frame(width: 2.6, height: stemH)
         }
+        .frame(width: 14, height: stemH + 13)
     }
 
-    var flagCanvas: some View {
+    var flagCurl: some View {
         Canvas { ctx, size in
             var p = Path()
-            p.move(to: CGPoint(x: 0, y: 0))
+            p.move(to: .init(x: 0, y: 0))
             p.addCurve(
-                to:       CGPoint(x: size.width,     y: size.height * 0.55),
-                control1: CGPoint(x: size.width,     y: -size.height * 0.15),
-                control2: CGPoint(x: size.width,     y: size.height * 0.2)
-            )
+                to:       .init(x: size.width,   y: size.height * 0.5),
+                control1: .init(x: size.width,   y: -size.height * 0.1),
+                control2: .init(x: size.width,   y: size.height * 0.15))
             p.addCurve(
-                to:       CGPoint(x: 0,              y: size.height),
-                control1: CGPoint(x: size.width * 0.5, y: size.height * 0.8),
-                control2: CGPoint(x: 0,              y: size.height * 0.95)
-            )
+                to:       .init(x: 0,            y: size.height),
+                control1: .init(x: size.width * 0.55, y: size.height * 0.78),
+                control2: .init(x: 0,            y: size.height * 0.9))
             ctx.fill(p, with: .color(Color(hex: "9333ea")))
+        }
+        .opacity(Double(turnT))
+    }
+
+    // MARK: - Eyes (above the circle)
+
+    var eyeRow: some View {
+        HStack(spacing: eyeR * 1.2 * turnT + eyeR * 0.2) {
+            // Left eye disappears when fully sideways
+            if turnT > 0.3 {
+                singleEye
+                    .opacity(Double((turnT - 0.3) / 0.7))
+            }
+            singleEye
         }
     }
 
-    // MARK: - Leg
+    var singleEye: some View {
+        ZStack {
+            // White sclera
+            Circle()
+                .fill(Color.white)
+                .frame(width: eyeR * 2, height: eyeR * 2)
+                // Subtle drop shadow under eye
+                .shadow(color: Color.black.opacity(0.25), radius: 2, y: 1)
 
-    func legView(angle: Double) -> some View {
-        RoundedRectangle(cornerRadius: legW / 2)
-            .fill(LinearGradient(
-                colors: [Color(hex: "a855f7"), Color(hex: "3b0764")],
-                startPoint: .top, endPoint: .bottom))
-            .frame(width: legW, height: legH)
-            .rotationEffect(.degrees(angle), anchor: .top)
+            // Iris
+            Circle()
+                .fill(RadialGradient(
+                    colors: [Color(hex: "9333ea"), Color(hex: "4c1d95")],
+                    center: .topLeading, startRadius: 0, endRadius: eyeR * 1.5))
+                .frame(width: eyeR * 1.4, height: eyeR * 1.4)
+                .offset(x: gazeX * eyeR * 0.22, y: gazeY * eyeR * 0.22)
+
+            // Pupil
+            Circle()
+                .fill(Color(hex: "0a0015"))
+                .frame(width: eyeR * 0.7 * pupilD, height: eyeR * 0.7 * pupilD)
+                .offset(x: gazeX * eyeR * 0.22, y: gazeY * eyeR * 0.22)
+
+            // Main glint
+            Circle()
+                .fill(Color.white.opacity(0.9))
+                .frame(width: eyeR * 0.28, height: eyeR * 0.28)
+                .offset(x: gazeX * eyeR * 0.22 + eyeR * 0.22,
+                        y: gazeY * eyeR * 0.22 - eyeR * 0.22)
+
+            // Eyelid blink (fills from top)
+            Rectangle()
+                .fill(Color.white)
+                .frame(width: eyeR * 2.2, height: eyeR * 2.2)
+                .scaleEffect(y: 1 - blinkT, anchor: .top)
+                .clipShape(Circle().scale(1.05))
+        }
+        .frame(width: eyeR * 2, height: eyeR * 2)
+        .clipShape(Circle())
+    }
+
+    // MARK: - Body
+
+    var bodyView: some View {
+        ZStack {
+            // Glow
+            Ellipse()
+                .fill(Color(hex: "a855f7").opacity(0.22))
+                .frame(width: bodyR * 2 * turnT + 8,
+                       height: bodyR * 2 + 6)
+                .blur(radius: 8)
+
+            // Main circle — squishes on X for 3D turn
+            Ellipse()
+                .fill(LinearGradient(
+                    colors: [Color(hex: "d8b4fe"), Color(hex: "7c3aed"),
+                             Color(hex: "4c1d95")],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing))
+                .frame(width: bodyR * 2 * turnT + legW,  // min width = legW so never disappears
+                       height: bodyR * 2)
+
+            // Rim highlight (left edge)
+            Ellipse()
+                .fill(LinearGradient(
+                    colors: [Color.white.opacity(0.3), Color.clear],
+                    startPoint: .topLeading, endPoint: .center))
+                .frame(width: bodyR * 0.7 * turnT,
+                       height: bodyR * 1.1)
+                .offset(x: -bodyR * 0.55 * turnT)
+                .blur(radius: 1)
+        }
+    }
+
+    // MARK: - Legs + feet
+
+    var legsView: some View {
+        // The connecting hip bar
+        ZStack(alignment: .top) {
+            HStack(spacing: bodyR * 0.55 * turnT) {
+                legAndFoot(angle: legLAngle, facingRight: guyState == .walkingRight)
+                legAndFoot(angle: legRAngle, facingRight: guyState == .walkingRight)
+            }
+        }
+    }
+
+    func legAndFoot(angle: Double, facingRight: Bool) -> some View {
+        VStack(spacing: 0) {
+            // Leg
+            RoundedRectangle(cornerRadius: legW / 2)
+                .fill(Color(hex: "7c3aed"))
+                .frame(width: legW, height: legH)
+                .rotationEffect(.degrees(angle), anchor: .top)
+
+            // Foot (horizontal capsule)
+            Capsule()
+                .fill(Color(hex: "6d28d9"))
+                .frame(width: footW * CGFloat(cos(angle * .pi / 180)).magnitude + 2,
+                       height: legW * 0.9)
+                .offset(x: CGFloat(sin(angle * .pi / 180)) * legH * 0.5)
+        }
     }
 
     // MARK: - Continuous animations
 
     func startBob() {
-        withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
-            bodyY = -4
+        withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) {
+            bobY = -4
         }
     }
 
-    func swaySystem() {
-        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
-            stemAngle = 4
+    func startStemSway() {
+        withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
+            stemSway = 5
         }
     }
 
     // MARK: - State machine
 
     func scheduleNext(g: Int) {
-        let delay = Double.random(in: 1.8...4.5)
+        let delay = Double.random(in: 1.8...5.0)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             guard g == gen else { return }
             switch Int.random(in: 0...4) {
-            case 0: anticipateThenWalk(right: true,  g: g)
-            case 1: anticipateThenWalk(right: false, g: g)
+            case 0: beginWalk(right: true,  g: g)
+            case 1: beginWalk(right: false, g: g)
             case 2: faceCamera(g: g)
-            case 3: morphNote(g: g)
+            case 3: turnSideways(g: g)
             default: scheduleNext(g: g)
             }
         }
     }
 
-    // Anticipation dip before walking (gives weight)
-    func anticipateThenWalk(right: Bool, g: Int) {
-        let goRight = bodyX < -maxX * 0.75 ? true
-                    : bodyX >  maxX * 0.75 ? false
-                    : right
-        withAnimation(.easeIn(duration: 0.12)) {
-            scaleX = 1.08; scaleY = 0.92
+    func beginWalk(right: Bool, g: Int) {
+        let go = posX < -maxX * 0.8 ? true : posX > maxX * 0.8 ? false : right
+        // Turn to face direction
+        withAnimation(.easeInOut(duration: 0.18)) {
+            guyState = go ? .walkingRight : .walkingLeft
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            guard g == gen else { return }
-            withAnimation(.easeOut(duration: 0.1)) {
-                scaleX = 0.94; scaleY = 1.06
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                guard g == gen else { return }
-                withAnimation(.easeOut(duration: 0.08)) { scaleX = 1; scaleY = 1 }
-                guyState = goRight ? .walkingRight : .walkingLeft
-                walkStep(remaining: Int.random(in: 5...10),
-                         dir: goRight ? 1 : -1, g: g)
-            }
-        }
+        let steps = Int.random(in: 4...9)
+        walkStep(remaining: steps, dir: go ? 1 : -1, g: g)
     }
 
     func walkStep(remaining: Int, dir: CGFloat, g: Int) {
         guard g == gen else { return }
-        if remaining == 0 { landAndIdle(g: g); return }
-        let even   = remaining % 2 == 0
-        let newX   = min(maxX, max(-maxX, bodyX + dir * 3.8))
-        let squashY: CGFloat = even ? 0.94 : 1.06
-        let squashX: CGFloat = even ? 1.06 : 0.94
-        withAnimation(.easeInOut(duration: 0.15)) {
-            leftLeg  = even ?  26 : -6
-            rightLeg = even ? -26 :  6
-            bodyX    = newX
-            scaleX   = squashX
-            scaleY   = squashY
+        if remaining == 0 { finishWalk(g: g); return }
+        let even = remaining % 2 == 0
+        let newX = min(maxX, max(-maxX, posX + dir * 4))
+        withAnimation(.easeInOut(duration: 0.17)) {
+            legLAngle = even ?  24 : -7
+            legRAngle = even ? -24 :  7
+            posX = newX
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) {
             walkStep(remaining: remaining - 1, dir: dir, g: g)
         }
     }
 
-    // Landing squash then settle
-    func landAndIdle(g: Int) {
-        withAnimation(.easeOut(duration: 0.12)) {
-            scaleX = 1.14; scaleY = 0.86
-            leftLeg = 5; rightLeg = -5
+    func finishWalk(g: Int) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.6)) {
+            guyState  = .idle
+            legLAngle = 0; legRAngle = 0
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.5)) {
-                scaleX = 1; scaleY = 1
-                guyState = .idle
-            }
-            scheduleNext(g: g)
-        }
+        scheduleNext(g: g)
     }
 
     func faceCamera(g: Int) {
-        // Pupil dilates when making eye contact
-        withAnimation(.easeOut(duration: 0.18)) {
-            guyState = .facingCamera
-            gazeX = 0; gazeY = -0.1
-            pupilScale = 1.35
-            leftEyeExtraOffset  = .zero
-            rightEyeExtraOffset = .zero
+        withAnimation(.easeOut(duration: 0.2)) {
+            guyState  = .facingCamera
+            turnT     = 1
+            gazeX     = 0; gazeY = 0
+            pupilD    = 1.4
         }
         let hold = Double.random(in: 1.0...2.5)
         DispatchQueue.main.asyncAfter(deadline: .now() + hold) {
             guard g == gen else { return }
             withAnimation(.easeInOut(duration: 0.25)) {
-                guyState = .idle
-                pupilScale = 1.0
+                guyState = .idle; pupilD = 1
             }
             scheduleNext(g: g)
         }
     }
 
-    func morphNote(g: Int) {
-        let styles: [NoteStyle] = [.whole, .half]
-        let next = styles.randomElement()!
-        withAnimation(.easeInOut(duration: 0.3)) { noteStyle = next }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 2...4)) {
+    func turnSideways(g: Int) {
+        let goLeft = Bool.random()
+        guyState = goLeft ? .turningLeft : .turningRight
+        // Turn side
+        withAnimation(.easeInOut(duration: 0.3)) { turnT = 0.08 }
+        let hold = Double.random(in: 0.6...1.5)
+        DispatchQueue.main.asyncAfter(deadline: .now() + hold) {
             guard g == gen else { return }
-            withAnimation(.easeInOut(duration: 0.3)) { noteStyle = .quarter }
+            // Turn back
+            withAnimation(.easeInOut(duration: 0.28)) { turnT = 1; guyState = .idle }
             scheduleNext(g: g)
         }
     }
@@ -385,33 +334,15 @@ struct WalkingGuy: View {
     // MARK: - Eye wander
 
     func scheduleGaze(g: Int) {
-        let delay = Double.random(in: 0.6...2.0)
+        let delay = Double.random(in: 0.7...2.2)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             guard g == gen else { return }
-            let weird = Double.random(in: 0...1) < 0.12
-
-            withAnimation(.easeInOut(duration: weird ? 0.1 : 0.28)) {
-                if guyState == .facingCamera {
-                    // Small drift while maintaining eye contact
-                    gazeX = CGFloat.random(in: -0.3...0.3)
-                    gazeY = CGFloat.random(in: -0.2...0.2)
-                } else {
-                    gazeX = CGFloat.random(in: -1...1)
-                    gazeY = CGFloat.random(in: -0.8...0.8)
-                }
-                // Pupil reacts — dilates in dark gaze positions
-                pupilScale = guyState == .facingCamera
-                    ? 1.35
-                    : CGFloat.random(in: 0.75...1.2)
-
-                if weird {
-                    leftEyeExtraOffset  = CGSize(width: CGFloat.random(in: -3.5...3.5),
-                                                 height: CGFloat.random(in: -3.5...3.5))
-                    rightEyeExtraOffset = CGSize(width: CGFloat.random(in: -3.5...3.5),
-                                                 height: CGFloat.random(in: -3.5...3.5))
-                } else {
-                    leftEyeExtraOffset  = .zero
-                    rightEyeExtraOffset = .zero
+            let snap = guyState == .facingCamera
+            withAnimation(.easeInOut(duration: snap ? 0.08 : 0.3)) {
+                gazeX = snap ? 0 : CGFloat.random(in: -1...1)
+                gazeY = snap ? 0 : CGFloat.random(in: -0.8...0.8)
+                if guyState != .facingCamera {
+                    pupilD = CGFloat.random(in: 0.75...1.15)
                 }
             }
             scheduleGaze(g: g)
@@ -421,20 +352,18 @@ struct WalkingGuy: View {
     // MARK: - Blink
 
     func scheduleBlink(g: Int) {
-        let delay = Double.random(in: 2.5...6.5)
+        let delay = Double.random(in: 2.2...7.0)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             guard g == gen else { return }
-            // Close
-            withAnimation(.easeIn(duration: 0.06)) { blinkT = 0 }
-            // Open
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
-                withAnimation(.easeOut(duration: 0.08)) { blinkT = 1 }
-                // Occasional double-blink
-                if Double.random(in: 0...1) < 0.25 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
-                        withAnimation(.easeIn(duration: 0.06)) { blinkT = 0 }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
-                            withAnimation(.easeOut(duration: 0.08)) { blinkT = 1 }
+            withAnimation(.easeIn(duration: 0.055)) { blinkT = 0 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.085) {
+                withAnimation(.easeOut(duration: 0.07)) { blinkT = 1 }
+                // Double blink ~20% of the time
+                if Double.random(in: 0...1) < 0.2 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        withAnimation(.easeIn(duration: 0.055)) { blinkT = 0 }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.085) {
+                            withAnimation(.easeOut(duration: 0.07)) { blinkT = 1 }
                         }
                     }
                 }
