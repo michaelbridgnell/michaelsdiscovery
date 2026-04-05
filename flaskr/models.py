@@ -54,6 +54,15 @@ class Post(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+class PasswordResetCode(db.Model):
+    """Single-use 6-digit code for password reset. Expires in 15 minutes."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    code = db.Column(db.String(6), nullable=False)
+    expires_at = db.Column(db.DateTime(timezone=True), nullable=False)
+    used = db.Column(db.Boolean, default=False, nullable=False)
+
+
 class Album(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(255), nullable=False)

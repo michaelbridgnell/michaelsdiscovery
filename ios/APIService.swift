@@ -135,6 +135,37 @@ class APIService {
         return try JSONDecoder().decode([FriendTasteTrack].self, from: checked(data, res))
     }
 
+    /// Returns "available", "taken", or "invalid"
+    func checkUsername(_ username: String) async throws -> String {
+        let enc = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
+        let req = authedRequest("/check-username/\(enc)")
+        let (data, res) = try await session.data(for: req)
+        let body = try checked(data, res)
+        if let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            if let available = json["available"] as? Bool {
+                return available ? "available" : "taken"
+            }
+            if let reason = json["reason"] as? String, reason == "invalid format" {
+                return "invalid"
+            }
+        }
+        return "invalid"
+    }
+
+    func forgotPassword(email: String) async throws {
+        var req = authedRequest("/forgot-password", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["email": email])
+        let (data, res) = try await session.data(for: req)
+        _ = try checked(data, res)
+    }
+
+    func resetPassword(email: String, code: String, newPassword: String) async throws {
+        var req = authedRequest("/reset-password", method: "POST")
+        req.httpBody = try JSONEncoder().encode(["email": email, "code": code, "password": newPassword])
+        let (data, res) = try await session.data(for: req)
+        _ = try checked(data, res)
+    }
+
     func getMyPostCount() async throws -> Int {
         let req = authedRequest("/me/posts/count")
         let (data, res) = try await session.data(for: req)

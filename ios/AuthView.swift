@@ -13,7 +13,14 @@ struct AuthView: View {
     @State private var error = ""
     @State private var loading = false
     @State private var appeared = false
-    @State private var showForgotAlert = false
+    @State private var showForgot = false
+    @State private var showPrivacy = false
+    @State private var showTerms = false
+
+    // Real-time username availability
+    private enum UsernameStatus { case idle, checking, available, taken, invalid }
+    @State private var usernameStatus: UsernameStatus = .idle
+    @State private var usernameCheckTask: Task<Void, Never>? = nil
 
     var body: some View {
         ZStack {
@@ -21,22 +28,23 @@ struct AuthView: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
-            // ── Music note guy — comically out of place in the corner ────────
+            // ── Walking guy — bottom-right corner ───────────────────────
             GeometryReader { geo in
-                MusicNoteGuy()
-                    .position(x: geo.size.width - 38, y: geo.size.height - 96)
+                WalkingGuy()
+                    .frame(width: 52, height: 72)
+                    .position(x: geo.size.width - 38, y: geo.size.height - 88)
             }
             .ignoresSafeArea()
 
-            // ── Main form ───────────────────────────────────────────────────
-            ScrollView {
+            // ── Main form ───────────────────────────────────────────────
+            ScrollView(showsIndicators: false) {
                 VStack(spacing: 28) {
-                    Spacer().frame(height: 48)
+                    Spacer().frame(height: 52)
 
                     // Logo
                     VStack(spacing: 8) {
-                        Text("Recomendo")
-                            .font(.custom("AvenirNext-Heavy", size: 50))
+                        Text("Sonik")
+                            .font(.custom("AvenirNext-Heavy", size: 56))
                             .italic()
                             .foregroundStyle(
                                 LinearGradient(
@@ -44,7 +52,6 @@ struct AuthView: View {
                                     startPoint: .topLeading,
                                     endPoint: .bottomTrailing)
                             )
-
                         Text("Trained on raw sound. Powered by AI.")
                             .font(.subheadline)
                             .foregroundColor(Color(hex: "b084f5"))
@@ -54,42 +61,40 @@ struct AuthView: View {
 
                     // Fields
                     VStack(spacing: 12) {
-                        inputField(
-                            placeholder: "Email",
-                            text: $email,
-                            keyboard: .emailAddress
-                        )
+                        inputField(placeholder: "Email", text: $email, keyboard: .emailAddress)
 
                         if !isLogin {
-                            inputField(
-                                placeholder: "Username (shown to others)",
-                                text: $username,
-                                keyboard: .default
-                            )
+                            // Username + availability indicator
+                            ZStack(alignment: .trailing) {
+                                inputField(placeholder: "Username (shown to others)",
+                                           text: $username, keyboard: .default)
+                                    .onChange(of: username) { _, newVal in
+                                        checkUsername(newVal)
+                                    }
+                                    .padding(.trailing, 36)
+                                usernameIndicator
+                                    .padding(.trailing, 14)
+                            }
                         }
 
-                        // Password field with eye toggle
+                        // Password + eye toggle
                         ZStack(alignment: .trailing) {
-                            if showPassword {
-                                TextField("Password", text: $password)
-                                    .autocapitalization(.none)
-                                    .padding()
-                                    .padding(.trailing, 44)
-                                    .background(Color.white.opacity(0.08))
-                                    .cornerRadius(14)
-                                    .foregroundColor(.white)
-                                    .overlay(RoundedRectangle(cornerRadius: 14)
-                                        .stroke(Color.white.opacity(0.12)))
-                            } else {
-                                SecureField("Password", text: $password)
-                                    .padding()
-                                    .padding(.trailing, 44)
-                                    .background(Color.white.opacity(0.08))
-                                    .cornerRadius(14)
-                                    .foregroundColor(.white)
-                                    .overlay(RoundedRectangle(cornerRadius: 14)
-                                        .stroke(Color.white.opacity(0.12)))
+                            Group {
+                                if showPassword {
+                                    TextField("Password", text: $password)
+                                        .autocapitalization(.none)
+                                } else {
+                                    SecureField("Password", text: $password)
+                                }
                             }
+                            .padding()
+                            .padding(.trailing, 44)
+                            .background(Color.white.opacity(0.08))
+                            .cornerRadius(14)
+                            .foregroundColor(.white)
+                            .overlay(RoundedRectangle(cornerRadius: 14)
+                                .stroke(Color.white.opacity(0.12)))
+
                             Button(action: { showPassword.toggle() }) {
                                 Image(systemName: showPassword ? "eye.slash" : "eye")
                                     .foregroundColor(.gray)
@@ -100,16 +105,15 @@ struct AuthView: View {
                         // Password requirements (register only)
                         if !isLogin && !password.isEmpty {
                             VStack(alignment: .leading, spacing: 5) {
-                                requirementRow("At least 8 characters", met: password.count >= 8)
-                                requirementRow("Contains a letter", met: password.contains(where: \.isLetter))
-                                requirementRow("Contains a number", met: password.contains(where: \.isNumber))
+                                reqRow("At least 8 characters", met: password.count >= 8)
+                                reqRow("Contains a letter", met: password.contains(where: \.isLetter))
+                                reqRow("Contains a number", met: password.contains(where: \.isNumber))
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 4)
                             .transition(.opacity)
                         }
 
-                        // Error
                         if !error.isEmpty {
                             Text(error)
                                 .foregroundColor(.red)
@@ -118,50 +122,52 @@ struct AuthView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
 
-                        // Submit
                         Button(action: submit) {
                             if loading {
                                 ProgressView().tint(.white)
                             } else {
                                 Text(isLogin ? "Log In" : "Create Account")
-                                    .fontWeight(.bold)
-                                    .foregroundColor(.white)
+                                    .fontWeight(.bold).foregroundColor(.white)
                             }
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(
-                            LinearGradient(colors: [Color(hex: "7c3aed"), Color(hex: "a855f7")],
-                                           startPoint: .leading, endPoint: .trailing)
-                        )
+                        .frame(maxWidth: .infinity).padding()
+                        .background(LinearGradient(
+                            colors: [Color(hex: "7c3aed"), Color(hex: "a855f7")],
+                            startPoint: .leading, endPoint: .trailing))
                         .cornerRadius(14)
-                        .disabled(loading)
-                        .animation(.none, value: loading)
+                        .disabled(loading || (!isLogin && usernameStatus == .taken))
                     }
                     .padding(.horizontal, 32)
 
-                    // Forgot / Switch
+                    // Footer links
                     VStack(spacing: 10) {
                         if isLogin {
-                            Button("Forgot password?") {
-                                showForgotAlert = true
-                            }
-                            .foregroundColor(Color(hex: "b084f5").opacity(0.7))
-                            .font(.footnote)
+                            Button("Forgot password?") { showForgot = true }
+                                .foregroundColor(Color(hex: "b084f5").opacity(0.7))
+                                .font(.footnote)
                         }
-
                         Button(isLogin
                                ? "Don't have an account? Sign up"
                                : "Already have an account? Log in") {
-                            withAnimation(.easeInOut(duration: 0.2)) {
+                            withAnimation(.easeInOut(duration: 0.18)) {
                                 isLogin.toggle()
                                 error = ""
-                                // Keep email/password — don't clear on switch
+                                usernameStatus = .idle
+                                // Don't clear email/password on switch
                             }
                         }
                         .foregroundColor(Color(hex: "b084f5"))
                         .font(.footnote)
                     }
+
+                    // Legal links
+                    HStack(spacing: 16) {
+                        Button("Privacy Policy") { showPrivacy = true }
+                        Text("·").foregroundColor(.gray.opacity(0.4))
+                        Button("Terms of Service") { showTerms = true }
+                    }
+                    .font(.caption2)
+                    .foregroundColor(.gray.opacity(0.5))
 
                     Spacer().frame(height: 80)
                 }
@@ -172,10 +178,52 @@ struct AuthView: View {
                 withAnimation(.easeOut(duration: 0.55)) { appeared = true }
             }
         }
-        .alert("Reset Password", isPresented: $showForgotAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Email support@recomendo.app from your registered address and we'll send a reset link.")
+        .sheet(isPresented: $showForgot) { ForgotPasswordView() }
+        .sheet(isPresented: $showPrivacy) { LegalView(doc: .privacy) }
+        .sheet(isPresented: $showTerms)  { LegalView(doc: .terms)   }
+    }
+
+    // MARK: - Username availability indicator
+
+    @ViewBuilder
+    var usernameIndicator: some View {
+        switch usernameStatus {
+        case .idle: EmptyView()
+        case .checking:
+            ProgressView().scaleEffect(0.7).tint(.gray)
+        case .available:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(Color(hex: "a855f7"))
+                .font(.system(size: 16))
+        case .taken:
+            Image(systemName: "xmark.circle.fill")
+                .foregroundColor(.red)
+                .font(.system(size: 16))
+        case .invalid:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundColor(.orange)
+                .font(.system(size: 16))
+        }
+    }
+
+    func checkUsername(_ value: String) {
+        usernameCheckTask?.cancel()
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { usernameStatus = .idle; return }
+        usernameStatus = .checking
+        usernameCheckTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000) // 400ms debounce
+            guard !Task.isCancelled else { return }
+            do {
+                let result = try await APIService.shared.checkUsername(trimmed)
+                await MainActor.run {
+                    if result == "available" { usernameStatus = .available }
+                    else if result == "taken" { usernameStatus = .taken }
+                    else { usernameStatus = .invalid }
+                }
+            } catch {
+                await MainActor.run { usernameStatus = .idle }
+            }
         }
     }
 
@@ -192,14 +240,12 @@ struct AuthView: View {
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.12)))
     }
 
-    func requirementRow(_ text: String, met: Bool) -> some View {
+    func reqRow(_ text: String, met: Bool) -> some View {
         HStack(spacing: 6) {
             Image(systemName: met ? "checkmark.circle.fill" : "circle")
                 .font(.caption)
                 .foregroundColor(met ? Color(hex: "a855f7") : .gray)
-            Text(text)
-                .font(.caption)
-                .foregroundColor(met ? .white : .gray)
+            Text(text).font(.caption).foregroundColor(met ? .white : .gray)
         }
     }
 
@@ -207,26 +253,19 @@ struct AuthView: View {
 
     func submit() {
         error = ""
-        guard !email.trimmingCharacters(in: .whitespaces).isEmpty else {
-            error = "Please enter your email."
-            return
-        }
-        guard !password.isEmpty else {
-            error = "Please enter your password."
-            return
-        }
+        let trimEmail = email.trimmingCharacters(in: .whitespaces)
+        guard !trimEmail.isEmpty else { error = "Please enter your email."; return }
+        guard !password.isEmpty else { error = "Please enter your password."; return }
+
         if !isLogin {
-            guard !username.trimmingCharacters(in: .whitespaces).isEmpty else {
-                error = "Please choose a username."
-                return
-            }
-            guard password.count >= 8 else {
-                error = "Password must be at least 8 characters."
-                return
-            }
-            guard password.contains(where: \.isLetter),
+            let trimUser = username.trimmingCharacters(in: .whitespaces)
+            guard !trimUser.isEmpty else { error = "Please choose a username."; return }
+            guard usernameStatus != .taken else { error = "That username is taken."; return }
+            guard usernameStatus != .invalid else { error = "Username contains invalid or disallowed words."; return }
+            guard password.count >= 8,
+                  password.contains(where: \.isLetter),
                   password.contains(where: \.isNumber) else {
-                error = "Password must contain a letter and a number."
+                error = "Password needs 8+ chars, a letter and a number."
                 return
             }
         }
@@ -237,15 +276,11 @@ struct AuthView: View {
                 let response: AuthResponse
                 if isLogin {
                     response = try await APIService.shared.login(
-                        email: email.trimmingCharacters(in: .whitespaces).lowercased(),
-                        password: password
-                    )
+                        email: trimEmail.lowercased(), password: password)
                 } else {
                     response = try await APIService.shared.register(
                         username: username.trimmingCharacters(in: .whitespaces),
-                        email: email.trimmingCharacters(in: .whitespaces).lowercased(),
-                        password: password
-                    )
+                        email: trimEmail.lowercased(), password: password)
                 }
                 await MainActor.run {
                     token = response.token
@@ -255,22 +290,17 @@ struct AuthView: View {
             } catch APIError.server(let code) {
                 await MainActor.run {
                     switch code {
-                    case 401:
-                        error = "Wrong email or password."
-                    case 409:
-                        error = "Username or email is already taken."
-                    case 400:
-                        error = "Check your details — email must be valid, username 3-50 chars."
-                    case 429:
-                        error = "Too many attempts. Wait a minute and try again."
-                    default:
-                        error = "Server error (\(code)). Try again shortly."
+                    case 401: error = "Wrong email or password."
+                    case 409: error = "Username or email is already taken."
+                    case 400: error = "Check your details — email must be valid, username 3-50 chars."
+                    case 429: error = "Too many attempts. Wait a minute and try again."
+                    default:  error = "Server error (\(code)). Try again shortly."
                     }
                     loading = false
                 }
             } catch {
                 await MainActor.run {
-                    self.error = "Can't reach the server. Check your internet or wait 30s — the AI is starting up."
+                    self.error = "Can't reach the server — it may be starting up (wait ~30s and retry)."
                     loading = false
                 }
             }

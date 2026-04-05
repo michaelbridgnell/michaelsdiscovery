@@ -4,16 +4,23 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_caching import Cache
 
 db = SQLAlchemy()
 limiter = Limiter(key_func=get_remote_address, default_limits=[])
+cache = Cache()
 
 def create_app():
     app = Flask(__name__, instance_relative_config=True)
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev')
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///flaskr.sqlite'
+    # In-memory cache — fast, zero dependencies, sufficient for a single-server free tier
+    app.config['CACHE_TYPE'] = 'SimpleCache'
+    app.config['CACHE_DEFAULT_TIMEOUT'] = 300   # 5 minutes
+
     db.init_app(app)
     limiter.init_app(app)
+    cache.init_app(app)
     Migrate(app, db)
 
     from . import models  # noqa: F401 — needed so Migrate can see all tables
