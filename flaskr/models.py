@@ -51,6 +51,7 @@ class Post(db.Model):
     username = db.Column(db.String(80), nullable=False)  # denormalized for fast display
     content = db.Column(db.String(280), nullable=False)
     category = db.Column(db.String(50), nullable=False, default='General')
+    city = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 

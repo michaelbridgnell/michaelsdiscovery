@@ -26,7 +26,6 @@ struct MainTabView: View {
 
         UITabBar.appearance().standardAppearance   = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
-        UITabBar.appearance().selectionIndicatorImage = UIImage()
     }
 
     var body: some View {

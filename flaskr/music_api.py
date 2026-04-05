@@ -22,46 +22,64 @@ def search_tracks(query, limit=10):
         "media": "music",
         "limit": limit
     }
-    response = requests.get(url, params=params)
-    data = response.json()
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+    except Exception as e:
+        print(f"[iTunes API error] {e}")
+        return []
 
     tracks = []
-    for item in data["results"]:
-        if not item.get("previewUrl"):
+    for item in data.get("results", []):
+        preview_url = item.get("previewUrl")
+        track_name  = item.get("trackName")
+        artist_name = item.get("artistName")
+        if not preview_url or not track_name or not artist_name:
             continue
 
         album_title = item.get("collectionName", "Unknown Album")
-        album_obj = Album.query.filter_by(title=album_title).first()
-        if album_obj is None:
-            album_obj = Album(title=album_title)
-            db.session.add(album_obj)
-            db.session.flush()  # get album_obj.id before committing
+        try:
+            album_obj = Album.query.filter_by(title=album_title).first()
+            if album_obj is None:
+                album_obj = Album(title=album_title)
+                db.session.add(album_obj)
+                db.session.flush()
 
-        existing_track = Track.query.filter_by(preview_url=item["previewUrl"]).first()
-        if existing_track is None:
-            artwork = item.get("artworkUrl100", "")
-            if artwork:
-                artwork = artwork.replace("100x100bb", "400x400bb")
-            new_track = Track(
-                title=item["trackName"],
-                artist=item["artistName"],
-                preview_url=item["previewUrl"],
-                album_id=album_obj.id,
-                artwork_url=artwork or None,
-            )
-            if _CLAP_ENABLED:
-                try:
-                    from .embeddings import get_embedding
-                    new_track.set_vector(get_embedding(item["previewUrl"]))
-                except Exception as e:
-                    print(f"[embedding skipped] {e}")
-            db.session.add(new_track)
-        else:
-            new_track = existing_track
+            existing_track = Track.query.filter_by(preview_url=preview_url).first()
+            if existing_track is None:
+                artwork = item.get("artworkUrl100", "")
+                if artwork:
+                    artwork = artwork.replace("100x100bb", "400x400bb")
+                new_track = Track(
+                    title=track_name,
+                    artist=artist_name,
+                    preview_url=preview_url,
+                    album_id=album_obj.id,
+                    artwork_url=artwork or None,
+                )
+                if _CLAP_ENABLED:
+                    try:
+                        from .embeddings import get_embedding
+                        new_track.set_vector(get_embedding(preview_url))
+                    except Exception as e:
+                        print(f"[embedding skipped] {e}")
+                db.session.add(new_track)
+            else:
+                new_track = existing_track
 
-        tracks.append(new_track)
+            tracks.append(new_track)
+        except Exception as e:
+            print(f"[track insert error] {e}")
+            db.session.rollback()
+            continue
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        print(f"[db commit error] {e}")
+        db.session.rollback()
+
     return tracks
 
 if __name__ == "__main__":

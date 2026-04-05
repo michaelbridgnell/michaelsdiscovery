@@ -323,7 +323,11 @@ def fetch_recommendations(current_user, search_term):
     if cached is not None:
         return jsonify(cached)
 
-    tracks = search_tracks(search_term)
+    try:
+        tracks = search_tracks(search_term)
+    except Exception as e:
+        print(f"[search_tracks error] {e}")
+        return jsonify({"error": "track search failed"}), 500
     if not tracks:
         return jsonify([])
 
@@ -386,10 +390,22 @@ def swipe(current_user, track_id):
 
 @bp.route('/posts', methods=['GET'])
 @require_auth
-@limiter.limit("60 per minute")
+@limiter.limit("20 per minute")
 def get_posts(current_user):
     category = request.args.get('category', '').strip()
-    cache_key = f"posts_{category}"
+    city     = request.args.get('city', '').strip()[:100]
+    scope    = request.args.get('scope', '')        # 'global' = no city filter
+
+    # Global scope: stricter per-user rate limiting enforced here
+    if scope == 'global' and not city:
+        # Check a simple in-app counter via cache
+        global_key = f"global_req_{current_user.id}"
+        count = cache.get(global_key) or 0
+        if count >= 5:
+            return jsonify({"error": "Global feed rate limit — try again in a minute"}), 429
+        cache.set(global_key, count + 1, timeout=60)
+
+    cache_key = f"posts_{category}_{city}"
     cached    = cache.get(cache_key)
     if cached is not None:
         return jsonify(cached)
@@ -397,13 +413,16 @@ def get_posts(current_user):
     query = Post.query.order_by(Post.created_at.desc())
     if category and category in VALID_CATEGORIES:
         query = query.filter_by(category=category)
+    if city:
+        query = query.filter_by(city=city)
     posts = query.limit(50).all()
     payload = [{
         "id": p.id, "user_id": p.user_id, "username": p.username,
         "content": p.content, "category": p.category,
+        "city": p.city or "",
         "created_at": p.created_at.isoformat()
     } for p in posts]
-    cache.set(cache_key, payload, timeout=60)   # posts refresh every 60s
+    cache.set(cache_key, payload, timeout=60)
     return jsonify(payload)
 
 
@@ -414,12 +433,13 @@ def create_post(current_user):
     data     = request.get_json(silent=True) or {}
     content  = data.get('content', '').strip()[:280]
     category = data.get('category', 'General').strip()
+    city     = data.get('city', '').strip()[:100] or None
     if not content:
         return jsonify({"error": "content required"}), 400
     if category not in VALID_CATEGORIES:
         category = 'General'
     post = Post(user_id=current_user.id, username=current_user.username,
-                content=content, category=category)
+                content=content, category=category, city=city)
     db.session.add(post)
     db.session.commit()
     # Invalidate post cache

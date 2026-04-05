@@ -1,9 +1,54 @@
 import SwiftUI
+import CoreLocation
+import Observation
+
+// MARK: - Location Manager
+
+@Observable
+final class LocationManager: NSObject {
+    var city: String? = nil
+    var authDenied: Bool = false
+    private let clManager = CLLocationManager()
+
+    override init() {
+        super.init()
+        clManager.delegate = self
+    }
+
+    func requestLocation() {
+        clManager.requestWhenInUseAuthorization()
+        clManager.requestLocation()
+    }
+}
+
+extension LocationManager: CLLocationManagerDelegate {
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let loc = locations.first else { return }
+        Task {
+            let placemarks = try? await CLGeocoder().reverseGeocodeLocation(loc)
+            await MainActor.run { self.city = placemarks?.first?.locality }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {}
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let status = manager.authorizationStatus
+        authDenied = (status == .denied || status == .restricted)
+        if status == .authorizedWhenInUse || status == .authorizedAlways {
+            clManager.requestLocation()
+        }
+    }
+}
+
+// MARK: - CommunityView
 
 struct CommunityView: View {
     @AppStorage("username") var storedUsername = ""
+    @State private var locationManager = LocationManager()
 
-    @State private var selectedTab = 0  // 0 = Feed, 1 = Friends
+    @State private var selectedTab = 0      // 0 = Feed, 1 = Friends
+    @State private var feedScope  = 0      // 0 = Nearby, 1 = Global
     @State private var posts: [Post] = []
     @State private var selectedCategory: String? = nil
     @State private var showCreatePost = false
@@ -47,9 +92,9 @@ struct CommunityView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 12)
 
-                // Segment
+                // Tab segment
                 HStack(spacing: 0) {
-                    segmentButton("Feed", index: 0)
+                    segmentButton("Feed",    index: 0)
                     segmentButton("Friends", index: 1)
                 }
                 .padding(.horizontal)
@@ -63,24 +108,26 @@ struct CommunityView: View {
             }
         }
         .sheet(isPresented: $showCreatePost) { createPostSheet }
-        .sheet(isPresented: $showAddSheet) { addFriendSheet }
+        .sheet(isPresented: $showAddSheet)   { addFriendSheet }
         .sheet(isPresented: $showTasteSheet) { tasteSheet }
-        .onAppear { loadAll() }
+        .onAppear {
+            loadAll()
+            locationManager.requestLocation()
+        }
+        .onChange(of: feedScope) { _, _ in loadPosts() }
+        .onChange(of: locationManager.city) { _, _ in
+            if feedScope == 0 { loadPosts() }
+        }
     }
 
     func segmentButton(_ label: String, index: Int) -> some View {
         Button(action: { selectedTab = index }) {
             Text(label)
-                .fontWeight(.semibold)
-                .font(.subheadline)
+                .fontWeight(.semibold).font(.subheadline)
                 .foregroundColor(selectedTab == index ? .white : .gray)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
-                .background(
-                    selectedTab == index
-                        ? Color(hex: "7c3aed").opacity(0.6)
-                        : Color.clear
-                )
+                .background(selectedTab == index ? Color(hex: "7c3aed").opacity(0.6) : Color.clear)
                 .cornerRadius(10)
         }
     }
@@ -89,17 +136,46 @@ struct CommunityView: View {
 
     var feedView: some View {
         VStack(spacing: 0) {
-            // Category filter
+            // Nearby / Global scope toggle
+            HStack(spacing: 0) {
+                scopeButton("Nearby", icon: "location.fill", index: 0)
+                scopeButton("Global", icon: "globe",         index: 1)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+
+            // Location status (Nearby only)
+            if feedScope == 0 {
+                if locationManager.authDenied {
+                    Text("Location access denied — enable in Settings to see nearby posts")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                        .padding(.horizontal)
+                        .padding(.bottom, 6)
+                } else if let city = locationManager.city {
+                    HStack(spacing: 4) {
+                        Image(systemName: "location.fill").font(.caption2)
+                        Text(city).font(.caption2.bold())
+                    }
+                    .foregroundColor(Color(hex: "a855f7"))
+                    .padding(.horizontal)
+                    .padding(.bottom, 6)
+                } else {
+                    Text("Detecting location…")
+                        .font(.caption2).foregroundColor(.gray)
+                        .padding(.horizontal).padding(.bottom, 6)
+                }
+            }
+
+            // Category chips
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     categoryChip("All", selected: selectedCategory == nil) {
-                        selectedCategory = nil
-                        loadPosts()
+                        selectedCategory = nil; loadPosts()
                     }
                     ForEach(categories, id: \.self) { cat in
                         categoryChip(cat, selected: selectedCategory == cat) {
-                            selectedCategory = cat
-                            loadPosts()
+                            selectedCategory = cat; loadPosts()
                         }
                     }
                 }
@@ -117,16 +193,14 @@ struct CommunityView: View {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 36))
                         .foregroundColor(Color(hex: "a855f7").opacity(0.5))
-                    Text("No posts yet — be the first!")
+                    Text(feedScope == 0 ? "No nearby posts yet — be the first!" : "No posts yet")
                         .foregroundColor(.gray)
                 }
                 Spacer()
             } else {
                 ScrollView {
                     LazyVStack(spacing: 10) {
-                        ForEach(posts) { post in
-                            postRow(post)
-                        }
+                        ForEach(posts) { post in postRow(post) }
                     }
                     .padding(.horizontal)
                     .padding(.bottom, 20)
@@ -135,13 +209,28 @@ struct CommunityView: View {
         }
     }
 
+    func scopeButton(_ label: String, icon: String, index: Int) -> some View {
+        Button(action: { feedScope = index }) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 11))
+                Text(label).fontWeight(.semibold).font(.subheadline)
+            }
+            .foregroundColor(feedScope == index ? .white : .gray)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .background(feedScope == index ? Color(hex: "a855f7").opacity(0.25) : Color.clear)
+            .cornerRadius(10)
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .stroke(feedScope == index ? Color(hex: "a855f7").opacity(0.5) : Color.clear, lineWidth: 1))
+        }
+    }
+
     func categoryChip(_ label: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
                 .font(.caption.bold())
                 .foregroundColor(selected ? .white : .gray)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 12).padding(.vertical, 6)
                 .background(selected ? Color(hex: "7c3aed") : Color.white.opacity(0.07))
                 .cornerRadius(20)
         }
@@ -151,33 +240,34 @@ struct CommunityView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 ZStack {
-                    Circle()
-                        .fill(Color(hex: "2a1040"))
-                        .frame(width: 34, height: 34)
+                    Circle().fill(Color(hex: "2a1040")).frame(width: 34, height: 34)
                     Text(post.username.prefix(1).uppercased())
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(Color(hex: "a855f7"))
                 }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("@\(post.username)")
-                        .font(.caption.bold())
-                        .foregroundColor(.white)
-                    Text(timeAgo(post.created_at))
-                        .font(.caption2)
-                        .foregroundColor(.gray)
+                    HStack(spacing: 6) {
+                        Text("@\(post.username)").font(.caption.bold()).foregroundColor(.white)
+                        if let city = post.city, !city.isEmpty {
+                            HStack(spacing: 2) {
+                                Image(systemName: "location.fill").font(.system(size: 8))
+                                Text(city).font(.caption2)
+                            }
+                            .foregroundColor(Color(hex: "a855f7").opacity(0.7))
+                        }
+                    }
+                    Text(timeAgo(post.created_at)).font(.caption2).foregroundColor(.gray)
                 }
                 Spacer()
                 Text(post.category)
                     .font(.caption2.bold())
                     .foregroundColor(Color(hex: "a855f7"))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
                     .background(Color(hex: "a855f7").opacity(0.15))
                     .cornerRadius(8)
             }
             Text(post.content)
-                .foregroundColor(.white)
-                .font(.subheadline)
+                .foregroundColor(.white).font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
@@ -203,32 +293,21 @@ struct CommunityView: View {
             VStack(spacing: 16) {
                 if !requests.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("REQUESTS")
-                            .foregroundColor(.gray)
-                            .font(.caption.bold())
-                            .padding(.horizontal)
+                        Text("REQUESTS").foregroundColor(.gray).font(.caption.bold()).padding(.horizontal)
                         ForEach(requests) { req in requestRow(req) }
                     }
                 }
-
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("FRIENDS")
-                        .foregroundColor(.gray)
-                        .font(.caption.bold())
-                        .padding(.horizontal)
+                    Text("FRIENDS").foregroundColor(.gray).font(.caption.bold()).padding(.horizontal)
                     if friends.isEmpty {
                         VStack(spacing: 12) {
-                            Image(systemName: "person.2")
-                                .font(.system(size: 36))
+                            Image(systemName: "person.2").font(.system(size: 36))
                                 .foregroundColor(Color(hex: "a855f7").opacity(0.5))
-                            Text("No friends yet")
-                                .foregroundColor(.gray)
+                            Text("No friends yet").foregroundColor(.gray)
                             Button("Add someone") { showAddSheet = true }
-                                .foregroundColor(Color(hex: "a855f7"))
-                                .font(.subheadline)
+                                .foregroundColor(Color(hex: "a855f7")).font(.subheadline)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(32)
+                        .frame(maxWidth: .infinity).padding(32)
                     } else {
                         ForEach(friends) { friend in friendRow(friend) }
                     }
@@ -243,8 +322,7 @@ struct CommunityView: View {
             ZStack {
                 Circle().fill(Color(hex: "2a1040")).frame(width: 40, height: 40)
                 Text(req.username.prefix(1).uppercased())
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(Color(hex: "a855f7"))
+                    .font(.system(size: 16, weight: .bold)).foregroundColor(Color(hex: "a855f7"))
             }
             VStack(alignment: .leading) {
                 Text(req.username).foregroundColor(.white).fontWeight(.semibold)
@@ -260,14 +338,9 @@ struct CommunityView: View {
             .padding(.horizontal, 14).padding(.vertical, 8)
             .background(LinearGradient(colors: [Color(hex: "7c3aed"), Color(hex: "a855f7")],
                                        startPoint: .leading, endPoint: .trailing))
-            .cornerRadius(10)
-            .foregroundColor(.white)
-            .font(.caption.bold())
+            .cornerRadius(10).foregroundColor(.white).font(.caption.bold())
         }
-        .padding()
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(14)
-        .padding(.horizontal)
+        .padding().background(Color.white.opacity(0.05)).cornerRadius(14).padding(.horizontal)
     }
 
     func friendRow(_ friend: Friend) -> some View {
@@ -275,8 +348,7 @@ struct CommunityView: View {
             ZStack {
                 Circle().fill(Color(hex: "2a1040")).frame(width: 40, height: 40)
                 Text(friend.username.prefix(1).uppercased())
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundColor(.gray)
+                    .font(.system(size: 16, weight: .bold)).foregroundColor(.gray)
             }
             Text(friend.username).foregroundColor(.white).fontWeight(.semibold)
             Spacer()
@@ -288,21 +360,16 @@ struct CommunityView: View {
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(Color.white.opacity(0.08))
-            .cornerRadius(10)
-            .foregroundColor(.white)
-            .font(.caption.bold())
+            .background(Color.white.opacity(0.08)).cornerRadius(10)
+            .foregroundColor(.white).font(.caption.bold())
         }
-        .padding()
-        .background(Color.white.opacity(0.05))
-        .cornerRadius(14)
-        .padding(.horizontal)
+        .padding().background(Color.white.opacity(0.05)).cornerRadius(14).padding(.horizontal)
     }
 
     // MARK: - Sheets
 
     var createPostSheet: some View {
-        CreatePostView(onPost: {
+        CreatePostView(city: locationManager.city, onPost: {
             showCreatePost = false
             loadPosts()
         })
@@ -314,17 +381,13 @@ struct CommunityView: View {
             VStack(spacing: 24) {
                 HStack {
                     Spacer()
-                    Button("Cancel") { showAddSheet = false }
-                        .foregroundColor(.gray).padding()
+                    Button("Cancel") { showAddSheet = false }.foregroundColor(.gray).padding()
                 }
                 Spacer()
-                Text("Add Friend")
-                    .font(.title2.bold()).foregroundColor(.white)
+                Text("Add Friend").font(.title2.bold()).foregroundColor(.white)
                 TextField("Enter their username", text: $addUsername)
                     .autocapitalization(.none)
-                    .padding()
-                    .background(Color.white.opacity(0.08))
-                    .cornerRadius(12)
+                    .padding().background(Color.white.opacity(0.08)).cornerRadius(12)
                     .foregroundColor(.white)
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(hex: "a855f7").opacity(0.3), lineWidth: 1))
                     .padding(.horizontal, 32)
@@ -347,8 +410,7 @@ struct CommunityView: View {
                 .frame(maxWidth: .infinity).padding()
                 .background(LinearGradient(colors: [Color(hex: "7c3aed"), Color(hex: "a855f7")],
                                            startPoint: .leading, endPoint: .trailing))
-                .foregroundColor(.white).fontWeight(.bold)
-                .cornerRadius(12).padding(.horizontal, 32)
+                .foregroundColor(.white).fontWeight(.bold).cornerRadius(12).padding(.horizontal, 32)
                 .disabled(addUsername.isEmpty)
                 Spacer()
             }
@@ -361,11 +423,9 @@ struct CommunityView: View {
             VStack(spacing: 16) {
                 HStack {
                     Spacer()
-                    Button("Done") { showTasteSheet = false }
-                        .foregroundColor(.gray).padding()
+                    Button("Done") { showTasteSheet = false }.foregroundColor(.gray).padding()
                 }
-                Text("\(selectedFriend?.username ?? "")'s Taste")
-                    .font(.title2.bold()).foregroundColor(.white)
+                Text("\(selectedFriend?.username ?? "")'s Taste").font(.title2.bold()).foregroundColor(.white)
                 if friendTracks.isEmpty {
                     Text("Nothing liked yet.").foregroundColor(.gray).padding()
                 } else {
@@ -378,10 +438,7 @@ struct CommunityView: View {
                                 }
                                 Spacer()
                             }
-                            .padding()
-                            .background(Color.white.opacity(0.05))
-                            .cornerRadius(12)
-                            .padding(.horizontal)
+                            .padding().background(Color.white.opacity(0.05)).cornerRadius(12).padding(.horizontal)
                         }
                     }
                 }
@@ -399,8 +456,10 @@ struct CommunityView: View {
 
     func loadPosts() {
         loadingPosts = true
+        let city  = feedScope == 0 ? locationManager.city : nil
+        let scope = feedScope == 1 ? "global" : nil
         Task {
-            posts = (try? await APIService.shared.getPosts(category: selectedCategory)) ?? []
+            posts = (try? await APIService.shared.getPosts(category: selectedCategory, city: city, scope: scope)) ?? []
             await MainActor.run { loadingPosts = false }
         }
     }
@@ -418,9 +477,11 @@ struct CommunityView: View {
 // MARK: - Create Post Sheet
 
 struct CreatePostView: View {
+    let city: String?
     let onPost: () -> Void
     @State private var content = ""
     @State private var selectedCategory = "General"
+    @State private var shareLocation = true
     @State private var posting = false
     @State private var error = ""
     @Environment(\.dismiss) var dismiss
@@ -432,11 +493,9 @@ struct CreatePostView: View {
             Color.black.ignoresSafeArea()
             VStack(spacing: 20) {
                 HStack {
-                    Button("Cancel") { dismiss() }
-                        .foregroundColor(.gray)
+                    Button("Cancel") { dismiss() }.foregroundColor(.gray)
                     Spacer()
-                    Text("New Post")
-                        .font(.headline).foregroundColor(.white)
+                    Text("New Post").font(.headline).foregroundColor(.white)
                     Spacer()
                     Button("Post") { submitPost() }
                         .fontWeight(.bold)
@@ -445,16 +504,13 @@ struct CreatePostView: View {
                 }
                 .padding()
 
-                // Category picker
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(categories, id: \.self) { cat in
                             Button(action: { selectedCategory = cat }) {
-                                Text(cat)
-                                    .font(.caption.bold())
+                                Text(cat).font(.caption.bold())
                                     .foregroundColor(selectedCategory == cat ? .white : .gray)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
+                                    .padding(.horizontal, 12).padding(.vertical, 6)
                                     .background(selectedCategory == cat ? Color(hex: "7c3aed") : Color.white.opacity(0.07))
                                     .cornerRadius(20)
                             }
@@ -466,36 +522,34 @@ struct CreatePostView: View {
                 ZStack(alignment: .topLeading) {
                     if content.isEmpty {
                         Text("What's on your mind? Share a discovery, ask for recs...")
-                            .foregroundColor(.gray.opacity(0.6))
-                            .font(.subheadline)
-                            .padding(.horizontal, 20)
-                            .padding(.top, 20)
+                            .foregroundColor(.gray.opacity(0.6)).font(.subheadline)
+                            .padding(.horizontal, 20).padding(.top, 20)
                     }
                     TextEditor(text: $content)
-                        .foregroundColor(.white)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 120, maxHeight: 200)
+                        .foregroundColor(.white).scrollContentBackground(.hidden).background(Color.clear)
+                        .padding(.horizontal, 14).frame(minHeight: 120, maxHeight: 200)
                         .onChange(of: content) { _, v in if v.count > 280 { content = String(v.prefix(280)) } }
                 }
-                .padding(.vertical, 8)
-                .background(Color.white.opacity(0.06))
-                .cornerRadius(14)
-                .padding(.horizontal)
+                .padding(.vertical, 8).background(Color.white.opacity(0.06)).cornerRadius(14).padding(.horizontal)
 
                 HStack {
+                    if let city = city {
+                        Toggle(isOn: $shareLocation) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "location.fill").font(.caption)
+                                Text("Tag as \(city)").font(.caption)
+                            }
+                            .foregroundColor(Color(hex: "a855f7"))
+                        }
+                        .toggleStyle(SwitchToggleStyle(tint: Color(hex: "7c3aed")))
+                        .padding(.leading)
+                    }
                     Spacer()
-                    Text("\(content.count)/280")
-                        .font(.caption2)
-                        .foregroundColor(content.count > 250 ? .orange : .gray)
-                        .padding(.trailing)
+                    Text("\(content.count)/280").font(.caption2)
+                        .foregroundColor(content.count > 250 ? .orange : .gray).padding(.trailing)
                 }
 
-                if !error.isEmpty {
-                    Text(error).foregroundColor(.red).font(.caption)
-                }
-
+                if !error.isEmpty { Text(error).foregroundColor(.red).font(.caption) }
                 Spacer()
             }
         }
@@ -503,15 +557,13 @@ struct CreatePostView: View {
 
     func submitPost() {
         posting = true
+        let taggedCity = (shareLocation ? city : nil)
         Task {
             do {
-                try await APIService.shared.createPost(content: content, category: selectedCategory)
+                try await APIService.shared.createPost(content: content, category: selectedCategory, city: taggedCity)
                 await MainActor.run { onPost() }
             } catch {
-                await MainActor.run {
-                    self.error = "Couldn't post. Try again."
-                    posting = false
-                }
+                await MainActor.run { self.error = "Couldn't post. Try again."; posting = false }
             }
         }
     }

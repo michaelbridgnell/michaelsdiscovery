@@ -40,6 +40,7 @@ struct Post: Codable, Identifiable {
     let username: String
     let content: String
     let category: String
+    let city: String?
     let created_at: String
 }
 

@@ -3,25 +3,24 @@ import SwiftUI
 struct WalkingGuy: View {
 
     private enum GuyState {
-        case idle, walkingRight, walkingLeft, facingCamera, turningSide
+        case idle, walkingRight, walkingLeft, facingCamera
     }
 
     private let bodyR:  CGFloat = 20
-    private let stemH:  CGFloat = 26
+    private let stemH:  CGFloat = 46
     private let flagH:  CGFloat = 15
     private let flagW:  CGFloat = 13
     private let eyeR:   CGFloat = 7
     private let legH:   CGFloat = 22
     private let legW:   CGFloat = 4.5
     private let footW:  CGFloat = 11
-    private let stemW:  CGFloat = 3.5
+    private let stemW:  CGFloat = 5.5
     private let maxX:   CGFloat = 28
 
     @SwiftUI.State private var guyState: GuyState = .idle
     @SwiftUI.State private var gen = 0
 
     @SwiftUI.State private var posX:  CGFloat = 0
-    @SwiftUI.State private var bobY:  CGFloat = 0
     @SwiftUI.State private var turnT: CGFloat = 1   // 1=front, 0=side
 
     @SwiftUI.State private var legL: Double = 0
@@ -37,11 +36,10 @@ struct WalkingGuy: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             character
-                .offset(x: posX, y: bobY)
+                .offset(x: posX)
         }
-        .frame(width: maxX * 2 + 100, height: 106)
+        .frame(width: maxX * 2 + 100, height: 120)
         .onAppear {
-            startBob()
             startStemSway()
             scheduleNext(g: gen)
             scheduleGaze(g: gen)
@@ -53,34 +51,27 @@ struct WalkingGuy: View {
 
     var character: some View {
         ZStack {
-            // Body
-            bodyCircle
+            // Legs — bottom layer
+            HStack(spacing: max(2, bodyR * 0.45)) {
+                legAndFoot(angle: legL)
+                legAndFoot(angle: legR)
+            }
+            .offset(y: bodyR + 1)
 
-            // Left eye
-            singleEye
-                .offset(x: -eyeR * 1.1 * turnT,
-                        y: -(bodyR + eyeR * 0.45))
-                .opacity(turnT > 0.3 ? Double((turnT - 0.3) / 0.7) : 0)
-                .zIndex(3)
-
-            // Right eye
-            singleEye
-                .offset(x: eyeR * 0.5 * turnT,
-                        y: -(bodyR + eyeR * 0.55))
-                .zIndex(3)
-
-            // Stem
-            RoundedRectangle(cornerRadius: 2)
+            // Stem — behind body so body circle sits on the note head naturally
+            RoundedRectangle(cornerRadius: 2.5)
                 .fill(Color(hex: "5b21b6"))
                 .frame(width: stemW, height: stemH)
                 .rotationEffect(.degrees(stemSway))
-                .offset(x: bodyR * 0.65 * turnT,
-                        y: -(bodyR * 0.2 + stemH * 0.5))
-                .zIndex(2)
+                .offset(x: bodyR * 0.88,
+                        y: -(bodyR * 0.1 + stemH * 0.5))
 
-            // Flag
-            let stemTopX = bodyR * 0.65 * turnT + stemW * 0.5
-            let stemTopY = -(bodyR * 0.2 + stemH)
+            // Body — covers leg tops and base of stem
+            bodyCircle
+
+            // Flag — stays above body (it's at stem top, well clear of body)
+            let stemTopX = bodyR * 0.88 + stemW * 0.5
+            let stemTopY = -(bodyR * 0.1 + stemH)
             Canvas { ctx, size in
                 var p = Path()
                 p.move(to: .init(x: 0, y: 0))
@@ -95,18 +86,18 @@ struct WalkingGuy: View {
             .frame(width: flagW, height: flagH)
             .offset(x: stemTopX + flagW * 0.5,
                     y: stemTopY + flagH * 0.5)
-            .opacity(Double(turnT))
-            .zIndex(2)
 
-            // Legs
-            HStack(spacing: max(2, bodyR * 0.45 * turnT)) {
-                legAndFoot(angle: legL)
-                legAndFoot(angle: legR)
-            }
-            .offset(y: bodyR + 1)
-            .zIndex(1)
+            // Left eye — top layer
+            singleEye
+                .offset(x: -eyeR * 1.1,
+                        y: -(bodyR + eyeR * 0.45))
+
+            // Right eye — top layer
+            singleEye
+                .offset(x: eyeR * 0.5,
+                        y: -(bodyR + eyeR * 0.55))
         }
-        .frame(width: 90, height: 96)
+        .frame(width: 90, height: 120)
     }
 
     // MARK: - Body
@@ -115,7 +106,7 @@ struct WalkingGuy: View {
         ZStack {
             Ellipse()
                 .fill(Color(hex: "6d28d9"))
-                .frame(width: bodyR * 2 * turnT + legW,
+                .frame(width: bodyR * 2 * turnT,
                        height: bodyR * 2)
 
             Ellipse()
@@ -179,12 +170,6 @@ struct WalkingGuy: View {
 
     // MARK: - Continuous animations
 
-    func startBob() {
-        withAnimation(.easeInOut(duration: 0.78).repeatForever(autoreverses: true)) {
-            bobY = -5
-        }
-    }
-
     func startStemSway() {
         withAnimation(.easeInOut(duration: 2.3).repeatForever(autoreverses: true)) {
             stemSway = 5
@@ -197,11 +182,10 @@ struct WalkingGuy: View {
         let delay = Double.random(in: 2.0...5.5)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             guard g == gen else { return }
-            switch Int.random(in: 0...4) {
+            switch Int.random(in: 0...3) {
             case 0: beginWalk(right: true,  g: g)
             case 1: beginWalk(right: false, g: g)
             case 2: faceCamera(g: g)
-            case 3: turnSide(g: g)
             default: scheduleNext(g: g)
             }
         }
@@ -245,16 +229,6 @@ struct WalkingGuy: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 1.2...2.8)) {
             guard g == gen else { return }
             withAnimation(.easeInOut(duration: 0.25)) { guyState = .idle; pupilD = 1 }
-            scheduleNext(g: g)
-        }
-    }
-
-    func turnSide(g: Int) {
-        guyState = .turningSide
-        withAnimation(.easeInOut(duration: 0.35)) { turnT = 0.18 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.8...1.6)) {
-            guard g == gen else { return }
-            withAnimation(.easeInOut(duration: 0.30)) { turnT = 1; guyState = .idle }
             scheduleNext(g: g)
         }
     }

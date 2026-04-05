@@ -16,6 +16,14 @@ class APIService {
         return URLSession(configuration: config)
     }()
 
+    // 5s for lightweight availability checks — fail fast so UI doesn't spin forever
+    private let quickSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 5
+        config.timeoutIntervalForResource = 5
+        return URLSession(configuration: config)
+    }()
+
     // 300s for CLAP-heavy endpoints (model load + audio downloads on cold start)
     private let slowSession: URLSession = {
         let config = URLSessionConfiguration.default
@@ -82,17 +90,22 @@ class APIService {
         _ = try checked(data, res)
     }
 
-    func getPosts(category: String? = nil) async throws -> [Post] {
-        var path = "/posts"
-        if let cat = category { path += "?category=\(cat.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cat)" }
+    func getPosts(category: String? = nil, city: String? = nil, scope: String? = nil) async throws -> [Post] {
+        var parts: [String] = []
+        if let cat = category { parts.append("category=\(cat.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? cat)") }
+        if let c = city, !c.isEmpty { parts.append("city=\(c.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? c)") }
+        if let s = scope { parts.append("scope=\(s)") }
+        let path = "/posts" + (parts.isEmpty ? "" : "?" + parts.joined(separator: "&"))
         let req = authedRequest(path)
         let (data, res) = try await session.data(for: req)
         return try JSONDecoder().decode([Post].self, from: checked(data, res))
     }
 
-    func createPost(content: String, category: String) async throws {
+    func createPost(content: String, category: String, city: String? = nil) async throws {
         var req = authedRequest("/posts", method: "POST")
-        req.httpBody = try JSONEncoder().encode(["content": content, "category": category])
+        var body: [String: String] = ["content": content, "category": category]
+        if let c = city, !c.isEmpty { body["city"] = c }
+        req.httpBody = try JSONEncoder().encode(body)
         let (data, res) = try await session.data(for: req)
         _ = try checked(data, res)
     }
@@ -139,7 +152,7 @@ class APIService {
     func checkEmail(_ email: String) async throws -> String {
         let enc = email.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? email
         let req = authedRequest("/check-email/\(enc)")
-        let (data, res) = try await session.data(for: req)
+        let (data, res) = try await quickSession.data(for: req)
         // Ignore auth errors — check-email is public
         guard let http = res as? HTTPURLResponse, http.statusCode < 400 else { return "invalid" }
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -153,7 +166,7 @@ class APIService {
     func checkUsername(_ username: String) async throws -> String {
         let enc = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
         let req = authedRequest("/check-username/\(enc)")
-        let (data, res) = try await session.data(for: req)
+        let (data, res) = try await quickSession.data(for: req)
         let body = try checked(data, res)
         if let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
             if let available = json["available"] as? Bool {

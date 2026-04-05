@@ -50,37 +50,42 @@ Sonik ("we", "us", "our") is an AI-powered music discovery app. Contact: privacy
 • Audio interaction data: which tracks you like or dislike, used solely to train your personal taste model.
 • Posts: content you write in the Community tab.
 • Authentication tokens stored on your device.
+• Approximate location (city-level only): if you grant location permission, we use your city name to show you nearby community posts and optionally tag your posts with your city. We never collect precise GPS coordinates and your city is not shared with third parties.
 
 We do NOT collect:
-• Precise location
+• Precise GPS coordinates
 • Contacts or photos
 • Payment information
-• Any third-party tracking data
+• Any third-party tracking or advertising data
 
 3. How we use it
 • To provide personalised music recommendations (the core feature).
 • To let you connect with friends and share taste.
-• To run the Community feed.
+• To run location-filtered Community feeds so you can find posts from people near you.
 • We do not sell your data. Ever.
 
-4. Data storage
+4. Location data
+Location access is optional. If granted, we resolve your position to a city name using Apple's on-device geocoding. Only the city name is stored on our servers (when you choose to tag a post with your location). You can post without sharing location at any time. We do not track or log your location history.
+
+5. Data storage
 Your data is stored on Render.com servers (US region). Audio preview files are fetched from Apple's iTunes API and are not stored by us.
 
-5. Data retention
+6. Data retention
 You may delete your account at any time by emailing privacy@sonik.app. We will delete all personal data within 30 days.
 
-6. Third parties
+7. Third parties
 • Apple iTunes Search API — used to find songs (no personal data sent).
+• Apple CoreLocation / CLGeocoder — on-device geocoding (no data leaves your device except city name if you tag a post).
 • Render.com — hosting provider.
 • LAION CLAP — open-source audio model run on our servers.
 
-7. Your rights
+8. Your rights
 You have the right to access, correct, or delete your personal data. Email privacy@sonik.app.
 
-8. Children
+9. Children
 Sonik is not directed at users under 13. If you are under 13, do not create an account.
 
-9. Changes
+10. Changes
 We will notify registered users of material changes to this policy.
 """)
     }
@@ -107,7 +112,7 @@ You agree NOT to:
 Violations will result in immediate account termination.
 
 3. Your content
-Posts you write remain yours. By posting you grant Sonik a non-exclusive licence to display them in the app. We do not use your content to train any external models.
+Posts you write remain yours. By posting you grant Sonik a non-exclusive licence to display them in the app. We do not use your content to train any external models. If you choose to tag a post with your city, that city name will be visible to other users.
 
 4. Music content
 Song previews are sourced from Apple's iTunes API under their terms of use. Sonik does not store or redistribute full audio tracks.

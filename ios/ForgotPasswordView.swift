@@ -198,6 +198,11 @@ struct ForgotPasswordView: View {
     }
 
     func sendCode() {
+        let trimmed = email.trimmingCharacters(in: .whitespaces).lowercased()
+        let emailOK = trimmed.contains("@") && trimmed.contains(".") && trimmed.count > 5
+        guard emailOK else {
+            message = "Please enter a valid email address."; isError = true; return
+        }
         loading = true; message = ""
         Task {
             do {
