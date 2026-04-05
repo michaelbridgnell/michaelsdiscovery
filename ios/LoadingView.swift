@@ -33,7 +33,7 @@ struct LoadingView: View {
 
                     // Character centred
                     WalkingGuy()
-                        .frame(width: 52, height: 72)
+                        .frame(width: 160, height: 120)
                         .scaleEffect(pulse ? 1.06 : 1.0)
                         .animation(
                             .easeInOut(duration: 0.9).repeatForever(autoreverses: true),

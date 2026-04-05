@@ -1,7 +1,13 @@
+import os
 import requests
 
 from . import db
 from .models import Album, Track
+
+# CLAP requires ~450 MB RAM. Only load it when CLAP_ENABLED=1 is set.
+# On Render free tier leave this unset — tracks are saved without vectors
+# and fetch_recommendations falls back to random ordering.
+_CLAP_ENABLED = os.environ.get('CLAP_ENABLED', '0') == '1'
 
 def download_preview(preview_url, filename="temp_preview.mp3"):
     response = requests.get(preview_url)
@@ -39,11 +45,12 @@ def search_tracks(query, limit=10):
                 preview_url=item["previewUrl"],
                 album_id=album_obj.id,
             )
-            try:
-                from .embeddings import get_embedding
-                new_track.set_vector(get_embedding(item["previewUrl"]))
-            except Exception as e:
-                print(f"[embedding skipped] {e}")
+            if _CLAP_ENABLED:
+                try:
+                    from .embeddings import get_embedding
+                    new_track.set_vector(get_embedding(item["previewUrl"]))
+                except Exception as e:
+                    print(f"[embedding skipped] {e}")
             db.session.add(new_track)
         else:
             new_track = existing_track
