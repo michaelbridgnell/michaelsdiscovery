@@ -15,41 +15,16 @@ struct AuthView: View {
     @State private var appeared = false
     @State private var showForgotAlert = false
 
-    // Dancing emoji animation states
-    @State private var danceAngle: Double = -18
-    @State private var danceScale: CGFloat = 0.9
-    @State private var noteOffset: CGFloat = 0
-
     var body: some View {
         ZStack {
             LinearGradient(colors: [Color(hex: "1a0533"), Color.black],
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
-            // ── Comically out-of-place corner animation ─────────────────────
+            // ── Music note guy — comically out of place in the corner ────────
             GeometryReader { geo in
-                VStack(spacing: 2) {
-                    Text("🕺")
-                        .font(.system(size: 30))
-                        .rotationEffect(.degrees(danceAngle))
-                        .scaleEffect(danceScale)
-                    Text("♪")
-                        .font(.system(size: 13))
-                        .foregroundColor(Color(hex: "a855f7").opacity(0.6))
-                        .offset(y: noteOffset)
-                }
-                .position(x: geo.size.width - 36, y: geo.size.height - 100)
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 0.38).repeatForever(autoreverses: true)) {
-                        danceAngle = 18
-                    }
-                    withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
-                        danceScale = 1.12
-                    }
-                    withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
-                        noteOffset = -8
-                    }
-                }
+                MusicNoteGuy()
+                    .position(x: geo.size.width - 38, y: geo.size.height - 96)
             }
             .ignoresSafeArea()
 
