@@ -66,33 +66,34 @@ struct SwipeView: View {
                 Spacer()
 
                 if loading {
-                    VStack(spacing: 16) {
-                        ProgressView().tint(.white).scaleEffect(1.5)
-                        Text("Loading songs...")
-                            .foregroundColor(Color(hex: "9d7fc4"))
-                            .font(.subheadline)
-                        Text("First load can take up to 2 min while the AI wakes up")
-                            .foregroundColor(.gray)
-                            .font(.caption)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 40)
+                    VStack(spacing: 24) {
+                        WalkingGuy()
+                            .frame(width: 160, height: 120)
+                        Text("Finding tracks for you")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(.white)
+                        ProgressView()
+                            .tint(Color(hex: "a855f7"))
                     }
                 } else if let err = errorMessage {
-                    VStack(spacing: 16) {
-                        Image(systemName: "wifi.slash")
-                            .font(.system(size: 48))
+                    VStack(spacing: 20) {
+                        Image(systemName: "exclamationmark.circle")
+                            .font(.system(size: 44, weight: .light))
                             .foregroundColor(Color(hex: "a855f7"))
                         Text(err)
-                            .foregroundColor(.white)
-                            .font(.headline)
+                            .foregroundColor(Color(hex: "b084f5"))
+                            .font(.subheadline)
                             .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
                         Button(action: loadTracks) {
                             Text("Try Again")
-                                .fontWeight(.bold)
+                                .fontWeight(.semibold)
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 32)
                                 .padding(.vertical, 12)
-                                .background(Color(hex: "7c3aed"))
+                                .background(LinearGradient(
+                                    colors: [Color(hex: "7c3aed"), Color(hex: "a855f7")],
+                                    startPoint: .leading, endPoint: .trailing))
                                 .cornerRadius(12)
                         }
                     }

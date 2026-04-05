@@ -105,9 +105,10 @@ struct WalkingGuy: View {
 
     var eyeRow: some View {
         HStack(spacing: eyeR * 1.3 * turnT + eyeR * 0.1) {
-            if turnT > 0.2 {
+            // Left eye fades out — no x-squish, just opacity
+            if turnT > 0.3 {
                 singleEye
-                    .opacity(Double((turnT - 0.2) / 0.8))
+                    .opacity(Double((turnT - 0.3) / 0.7))
             }
             singleEye
         }
@@ -265,10 +266,11 @@ struct WalkingGuy: View {
 
     func turnSide(g: Int) {
         guyState = .turningSide
-        withAnimation(.easeInOut(duration: 0.3)) { turnT = 0.05 }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.7...1.6)) {
+        // 0.18 = thin oval side profile (not a slit — that looked terrible)
+        withAnimation(.easeInOut(duration: 0.35)) { turnT = 0.18 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Double.random(in: 0.8...1.6)) {
             guard g == gen else { return }
-            withAnimation(.easeInOut(duration: 0.28)) { turnT = 1; guyState = .idle }
+            withAnimation(.easeInOut(duration: 0.3)) { turnT = 1; guyState = .idle }
             scheduleNext(g: g)
         }
     }

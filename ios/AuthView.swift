@@ -18,9 +18,11 @@ struct AuthView: View {
     @State private var showTerms = false
 
     // Real-time username availability
-    private enum UsernameStatus { case idle, checking, available, taken, invalid }
-    @State private var usernameStatus: UsernameStatus = .idle
+    private enum FieldStatus { case idle, checking, available, taken, invalid }
+    @State private var usernameStatus: FieldStatus = .idle
     @State private var usernameCheckTask: Task<Void, Never>? = nil
+    @State private var emailStatus: FieldStatus = .idle
+    @State private var emailCheckTask: Task<Void, Never>? = nil
 
     var body: some View {
         ZStack {
@@ -61,7 +63,17 @@ struct AuthView: View {
 
                     // Fields
                     VStack(spacing: 12) {
-                        inputField(placeholder: "Email", text: $email, keyboard: .emailAddress)
+                        // Email + taken indicator (register only)
+                        ZStack(alignment: .trailing) {
+                            inputField(placeholder: "Email", text: $email, keyboard: .emailAddress)
+                                .onChange(of: email) { _, newVal in
+                                    if !isLogin { checkEmail(newVal) }
+                                }
+                                .padding(.trailing, !isLogin ? 36 : 0)
+                            if !isLogin {
+                                statusIcon(emailStatus).padding(.trailing, 14)
+                            }
+                        }
 
                         if !isLogin {
                             // Username + availability indicator
@@ -135,7 +147,7 @@ struct AuthView: View {
                             colors: [Color(hex: "7c3aed"), Color(hex: "a855f7")],
                             startPoint: .leading, endPoint: .trailing))
                         .cornerRadius(14)
-                        .disabled(loading || (!isLogin && usernameStatus == .taken))
+                        .disabled(loading || (!isLogin && (usernameStatus == .taken || emailStatus == .taken)))
                     }
                     .padding(.horizontal, 32)
 
@@ -153,7 +165,7 @@ struct AuthView: View {
                                 isLogin.toggle()
                                 error = ""
                                 usernameStatus = .idle
-                                // Don't clear email/password on switch
+                                emailStatus = .idle
                             }
                         }
                         .foregroundColor(Color(hex: "b084f5"))
@@ -183,26 +195,43 @@ struct AuthView: View {
         .sheet(isPresented: $showTerms)  { LegalView(doc: .terms)   }
     }
 
-    // MARK: - Username availability indicator
+    // MARK: - Field status indicator
 
     @ViewBuilder
-    var usernameIndicator: some View {
-        switch usernameStatus {
+    func statusIcon(_ status: FieldStatus) -> some View {
+        switch status {
         case .idle: EmptyView()
         case .checking:
             ProgressView().scaleEffect(0.7).tint(.gray)
         case .available:
             Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(Color(hex: "a855f7"))
-                .font(.system(size: 16))
+                .foregroundColor(Color(hex: "a855f7")).font(.system(size: 16))
         case .taken:
             Image(systemName: "xmark.circle.fill")
-                .foregroundColor(.red)
-                .font(.system(size: 16))
+                .foregroundColor(.red).font(.system(size: 16))
         case .invalid:
             Image(systemName: "exclamationmark.circle.fill")
-                .foregroundColor(.orange)
-                .font(.system(size: 16))
+                .foregroundColor(.orange).font(.system(size: 16))
+        }
+    }
+
+    // Keep the ZStack in the username row pointing to this
+    var usernameIndicator: some View { statusIcon(usernameStatus) }
+
+    func checkEmail(_ value: String) {
+        emailCheckTask?.cancel()
+        let trimmed = value.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !trimmed.isEmpty else { emailStatus = .idle; return }
+        emailStatus = .checking
+        emailCheckTask = Task {
+            try? await Task.sleep(nanoseconds: 500_000_000) // 500ms debounce
+            guard !Task.isCancelled else { return }
+            let result = (try? await APIService.shared.checkEmail(trimmed)) ?? "invalid"
+            await MainActor.run {
+                if result == "available" { emailStatus = .available }
+                else if result == "taken" { emailStatus = .taken }
+                else { emailStatus = .idle }  // invalid format — don't show error yet
+            }
         }
     }
 
@@ -212,7 +241,7 @@ struct AuthView: View {
         guard !trimmed.isEmpty else { usernameStatus = .idle; return }
         usernameStatus = .checking
         usernameCheckTask = Task {
-            try? await Task.sleep(nanoseconds: 400_000_000) // 400ms debounce
+            try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled else { return }
             do {
                 let result = try await APIService.shared.checkUsername(trimmed)
@@ -260,6 +289,7 @@ struct AuthView: View {
         if !isLogin {
             let trimUser = username.trimmingCharacters(in: .whitespaces)
             guard !trimUser.isEmpty else { error = "Please choose a username."; return }
+            guard emailStatus != .taken else { error = "That email is already registered."; return }
             guard usernameStatus != .taken else { error = "That username is taken."; return }
             guard usernameStatus != .invalid else { error = "Username contains invalid or disallowed words."; return }
             guard password.count >= 8,

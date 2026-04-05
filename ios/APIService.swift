@@ -136,6 +136,20 @@ class APIService {
     }
 
     /// Returns "available", "taken", or "invalid"
+    func checkEmail(_ email: String) async throws -> String {
+        let enc = email.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? email
+        let req = authedRequest("/check-email/\(enc)")
+        let (data, res) = try await session.data(for: req)
+        // Ignore auth errors — check-email is public
+        guard let http = res as? HTTPURLResponse, http.statusCode < 400 else { return "invalid" }
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let available = json["available"] as? Bool {
+            return available ? "available" : "taken"
+        }
+        return "invalid"
+    }
+
+    /// Returns "available", "taken", or "invalid"
     func checkUsername(_ username: String) async throws -> String {
         let enc = username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username
         let req = authedRequest("/check-username/\(enc)")

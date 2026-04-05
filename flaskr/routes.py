@@ -110,6 +110,16 @@ def _record_feedback(user_id, track_id, rating):
 # Auth endpoints
 # --------------------------------------------------
 
+@bp.route('/check-email/<path:email>')
+@limiter.limit("30 per minute")
+def check_email(email):
+    email = email.strip().lower()[:255]
+    if not EMAIL_RE.match(email):
+        return jsonify({"available": False, "reason": "invalid format"})
+    taken = User.query.filter_by(email=email).first() is not None
+    return jsonify({"available": not taken})
+
+
 @bp.route('/check-username/<username>')
 @limiter.limit("30 per minute")
 def check_username(username):
