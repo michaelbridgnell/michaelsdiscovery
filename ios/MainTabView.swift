@@ -11,21 +11,26 @@ struct MainTabView: View {
         let appearance = UITabBarAppearance()
         appearance.configureWithOpaqueBackground()
         appearance.backgroundColor = bg
-        appearance.shadowColor = UIColor.white.withAlphaComponent(0.08)
+        appearance.shadowColor = .clear
 
-        let item = UITabBarItemAppearance()
-        item.normal.iconColor = UIColor.gray
-        item.normal.titleTextAttributes = [.foregroundColor: UIColor.gray,
-                                           .font: UIFont.systemFont(ofSize: 10)]
+        let item = UITabBarItemAppearance(style: .stacked)
+        item.normal.iconColor  = UIColor.gray
+        item.normal.titleTextAttributes  = [.foregroundColor: UIColor.gray,
+                                            .font: UIFont.systemFont(ofSize: 10)]
         item.selected.iconColor = purple
         item.selected.titleTextAttributes = [.foregroundColor: purple,
                                              .font: UIFont.systemFont(ofSize: 10)]
-        appearance.stackedLayoutAppearance   = item
-        appearance.inlineLayoutAppearance    = item
+        // Kill the white selection highlight pill iOS 18 adds
+        item.selected.badgeBackgroundColor = .clear
+        appearance.selectionIndicatorTintColor = .clear
+        appearance.stackedLayoutAppearance       = item
+        appearance.inlineLayoutAppearance        = item
         appearance.compactInlineLayoutAppearance = item
 
         UITabBar.appearance().standardAppearance   = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
+        UITabBar.appearance().isTranslucent = false
+        UITabBar.appearance().backgroundColor = bg
     }
 
     var body: some View {
