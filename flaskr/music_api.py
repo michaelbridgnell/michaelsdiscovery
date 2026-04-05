@@ -39,8 +39,11 @@ def search_tracks(query, limit=10):
                 preview_url=item["previewUrl"],
                 album_id=album_obj.id,
             )
-            from .embeddings import get_embedding
-            new_track.set_vector(get_embedding(item["previewUrl"]))
+            try:
+                from .embeddings import get_embedding
+                new_track.set_vector(get_embedding(item["previewUrl"]))
+            except Exception as e:
+                print(f"[embedding skipped] {e}")
             db.session.add(new_track)
         else:
             new_track = existing_track

@@ -314,26 +314,37 @@ def fetch_recommendations(current_user, search_term):
         return jsonify(cached)
 
     tracks = search_tracks(search_term)
-    songs  = []
-    for track in tracks:
-        vec = track.get_vector()
-        if vec is None:
-            continue
-        songs.append({"id": track.id, "title": track.title, "artist": track.artist,
-                      "preview_url": track.preview_url, "vector": vec})
-    if not songs:
+    if not tracks:
         return jsonify([])
 
-    user_key    = f"user_{current_user.id}"
-    taste_model = _load_taste(current_user.id, songs)
-    cf_model    = CollaborativeRecommender(_load_interactions(current_user.id))
-    hybrid      = HybridRecommender(taste_model, cf_model)
-    results     = hybrid.recommend(user_key, songs, top_k=10)
-    payload     = [
-        {"id": s["id"], "title": s["title"], "artist": s["artist"],
-         "preview_url": s["preview_url"], "score": round(score, 3)}
-        for score, s in results
-    ]
+    songs = [{"id": t.id, "title": t.title, "artist": t.artist,
+              "preview_url": t.preview_url, "vector": t.get_vector()}
+             for t in tracks]
+
+    songs_with_vec = [s for s in songs if s["vector"] is not None]
+
+    if songs_with_vec:
+        # Taste model available — personalise ranking
+        user_key    = f"user_{current_user.id}"
+        taste_model = _load_taste(current_user.id, songs_with_vec)
+        cf_model    = CollaborativeRecommender(_load_interactions(current_user.id))
+        hybrid      = HybridRecommender(taste_model, cf_model)
+        results     = hybrid.recommend(user_key, songs_with_vec, top_k=10)
+        payload     = [
+            {"id": s["id"], "title": s["title"], "artist": s["artist"],
+             "preview_url": s["preview_url"], "score": round(score, 3)}
+            for score, s in results
+        ]
+    else:
+        # CLAP not available on this tier — return shuffled tracks so Discover still works
+        shuffled = list(songs)
+        random.shuffle(shuffled)
+        payload = [
+            {"id": s["id"], "title": s["title"], "artist": s["artist"],
+             "preview_url": s["preview_url"], "score": 0.5}
+            for s in shuffled[:10]
+        ]
+
     cache.set(cache_key, payload)
     return jsonify(payload)
 
