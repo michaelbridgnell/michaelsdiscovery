@@ -29,10 +29,12 @@ struct AuthView: View {
                 .ignoresSafeArea()
 
             // ── Walking guy — bottom-right corner ───────────────────────
+            // Wide frame so bodyX walk offsets don't clip him
             GeometryReader { geo in
                 WalkingGuy()
-                    .frame(width: 52, height: 72)
-                    .position(x: geo.size.width - 38, y: geo.size.height - 88)
+                    .frame(width: 110, height: 80)
+                    .clipped()
+                    .position(x: geo.size.width - 55, y: geo.size.height - 100)
             }
             .ignoresSafeArea()
 
