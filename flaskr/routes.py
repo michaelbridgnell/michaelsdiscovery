@@ -324,10 +324,16 @@ def fetch_recommendations(current_user, search_term):
         return jsonify(cached)
 
     try:
-        tracks = search_tracks(search_term)
+        tracks = search_tracks(search_term, limit=50)
     except Exception as e:
         print(f"[search_tracks error] {e}")
         return jsonify({"error": "track search failed"}), 500
+    if not tracks:
+        return jsonify([])
+
+    # Filter out tracks the user has already interacted with
+    seen_ids = {i.track_id for i in UserInteraction.query.filter_by(user_id=current_user.id).all()}
+    tracks = [t for t in tracks if t.id not in seen_ids]
     if not tracks:
         return jsonify([])
 
@@ -339,7 +345,6 @@ def fetch_recommendations(current_user, search_term):
     songs_with_vec = [s for s in songs if s["vector"] is not None]
 
     if songs_with_vec:
-        # Taste model available — personalise ranking
         user_key    = f"user_{current_user.id}"
         taste_model = _load_taste(current_user.id, songs_with_vec)
         cf_model    = CollaborativeRecommender(_load_interactions(current_user.id))
@@ -357,11 +362,11 @@ def fetch_recommendations(current_user, search_term):
         payload = [
             {"id": s["id"], "title": s["title"], "artist": s["artist"],
              "preview_url": s["preview_url"], "artwork_url": s.get("artwork_url", ""),
-             "score": 0.5}
+             "score": None}
             for s in shuffled[:10]
         ]
 
-    cache.set(cache_key, payload)
+    cache.set(cache_key, payload, timeout=180)
     return jsonify(payload)
 
 
@@ -377,9 +382,11 @@ def swipe(current_user, track_id):
     direction = data.get('direction')
     if direction not in ('like', 'dislike'):
         return jsonify({"error": "direction must be like or dislike"}), 400
-    # Invalidate rec cache so next fetch reflects the new rating
-    for key in [f"recs_{current_user.id}_top hits"]:
-        cache.delete(key)
+    # Invalidate all rec caches for this user across all search terms
+    search_terms = ["top hits", "new releases 2024", "hip hop", "pop hits",
+                    "rock", "electronic", "rnb", "jazz"]
+    for term in search_terms:
+        cache.delete(f"recs_{current_user.id}_{term}")
     rating = 1 if direction == 'like' else -1
     return _record_feedback(current_user.id, track_id, rating)
 
