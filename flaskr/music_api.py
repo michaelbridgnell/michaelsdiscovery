@@ -40,11 +40,13 @@ def search_tracks(query, limit=10):
 
         album_title = item.get("collectionName", "Unknown Album")
         try:
+            # Use merge pattern to avoid duplicate key errors on PostgreSQL
             album_obj = Album.query.filter_by(title=album_title).first()
             if album_obj is None:
                 album_obj = Album(title=album_title)
                 db.session.add(album_obj)
                 db.session.flush()
+                print(f"[album] created: {album_title} id={album_obj.id}")
 
             existing_track = Track.query.filter_by(preview_url=preview_url).first()
             if existing_track is None:
@@ -65,8 +67,11 @@ def search_tracks(query, limit=10):
                     except Exception as e:
                         print(f"[embedding skipped] {e}")
                 db.session.add(new_track)
+                db.session.flush()
+                print(f"[track] created: {track_name} id={new_track.id}")
             else:
                 new_track = existing_track
+                print(f"[track] existing: {track_name} id={new_track.id}")
 
             tracks.append(new_track)
         except Exception as e:
@@ -76,6 +81,7 @@ def search_tracks(query, limit=10):
 
     try:
         db.session.commit()
+        print(f"[search_tracks] committed {len(tracks)} tracks")
     except Exception as e:
         print(f"[db commit error] {e}")
         db.session.rollback()
