@@ -3,25 +3,21 @@ import SwiftUI
 struct MainTabView: View {
 
     init() {
-        // Set appearance in init so it applies before the first render,
-        // preventing the white flash on first tap.
-        let bg = UIColor(red: 0.06, green: 0.03, blue: 0.1, alpha: 1)
+        let bg     = UIColor(red: 0.06, green: 0.03, blue: 0.1, alpha: 1)
         let purple = UIColor(red: 0.66, green: 0.33, blue: 0.97, alpha: 1)
 
-        let appearance = UITabBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = bg
-        appearance.shadowColor = .clear
-
         let item = UITabBarItemAppearance(style: .stacked)
-        item.normal.iconColor  = UIColor.gray
+        item.normal.iconColor = UIColor.gray
         item.normal.titleTextAttributes  = [.foregroundColor: UIColor.gray,
                                             .font: UIFont.systemFont(ofSize: 10)]
         item.selected.iconColor = purple
         item.selected.titleTextAttributes = [.foregroundColor: purple,
                                              .font: UIFont.systemFont(ofSize: 10)]
-        // Kill the white selection highlight pill iOS 18 adds
-        item.selected.badgeBackgroundColor = .clear
+
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = bg
+        appearance.shadowColor     = .clear
         appearance.selectionIndicatorTintColor = .clear
         appearance.stackedLayoutAppearance       = item
         appearance.inlineLayoutAppearance        = item
@@ -29,8 +25,9 @@ struct MainTabView: View {
 
         UITabBar.appearance().standardAppearance   = appearance
         UITabBar.appearance().scrollEdgeAppearance = appearance
-        UITabBar.appearance().isTranslucent = false
-        UITabBar.appearance().backgroundColor = bg
+        UITabBar.appearance().isTranslucent        = false
+        UITabBar.appearance().barTintColor         = bg
+        UITabBar.appearance().unselectedItemTintColor = UIColor.gray
     }
 
     var body: some View {

@@ -28,6 +28,10 @@ def create_app():
     from .routes import bp
     app.register_blueprint(bp)
 
+    # Ensure all tables exist regardless of migration state
+    with app.app_context():
+        db.create_all()
+
     @app.after_request
     def security_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'

@@ -42,6 +42,7 @@ struct RecommendationsView: View {
                             }
                         }
                         .padding(.horizontal)
+                        .padding(.bottom, 20)
                     }
                 }
             }
@@ -66,14 +67,31 @@ struct TrackRow: View {
     let track: Track
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 14) {
+            // Artwork
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.purple.opacity(0.3))
+                    .fill(Color(hex: "2a1040"))
                     .frame(width: 52, height: 52)
-                Image(systemName: "music.note")
-                    .foregroundColor(.purple)
+                if let urlStr = track.artwork_url, let url = URL(string: urlStr) {
+                    AsyncImage(url: url) { phase in
+                        if let img = phase.image {
+                            img.resizable().aspectRatio(contentMode: .fill)
+                                .frame(width: 52, height: 52)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        } else {
+                            Image(systemName: "music.note")
+                                .foregroundColor(Color(hex: "a855f7"))
+                        }
+                    }
+                } else {
+                    Image(systemName: "music.note")
+                        .foregroundColor(Color(hex: "a855f7"))
+                }
             }
+            .frame(width: 52, height: 52)
+
+            // Title + artist
             VStack(alignment: .leading, spacing: 4) {
                 Text(track.title)
                     .foregroundColor(.white)
@@ -82,16 +100,65 @@ struct TrackRow: View {
                 Text(track.artist)
                     .foregroundColor(.gray)
                     .font(.caption)
+                    .lineLimit(1)
             }
+
             Spacer()
+
+            // Score
             if let score = track.score {
                 Text("\(Int(score * 100))%")
                     .font(.caption)
-                    .foregroundColor(.purple)
+                    .foregroundColor(Color(hex: "a855f7"))
+                    .frame(minWidth: 32)
             }
+
+            // Open in Spotify
+            Button(action: { openSpotify(track: track) }) {
+                Image("spotify_icon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 26, height: 26)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+
+            // Open in Apple Music
+            Button(action: { openAppleMusic(track: track) }) {
+                Image("applemusic_icon")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 26, height: 26)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
         }
-        .padding()
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(Color.white.opacity(0.05))
         .cornerRadius(14)
+    }
+
+    func openSpotify(track: Track) {
+        let query = "\(track.title) \(track.artist)"
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        // Try Spotify app deep link first, fall back to web
+        if let appURL = URL(string: "spotify:search:\(query)"),
+           UIApplication.shared.canOpenURL(appURL) {
+            UIApplication.shared.open(appURL)
+        } else if let webURL = URL(string: "https://open.spotify.com/search/\(query)") {
+            UIApplication.shared.open(webURL)
+        }
+    }
+
+    func openAppleMusic(track: Track) {
+        let query = "\(track.title) \(track.artist)"
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        if let appURL = URL(string: "music://music.apple.com/search?term=\(query)"),
+           UIApplication.shared.canOpenURL(appURL) {
+            UIApplication.shared.open(appURL)
+        } else if let webURL = URL(string: "https://music.apple.com/search?term=\(query)") {
+            UIApplication.shared.open(webURL)
+        }
     }
 }
