@@ -5,7 +5,9 @@ An AI-powered music discovery iOS app. Sonik learns your sonic taste through swi
 **Live backend:** https://michaelsdiscovery.onrender.com
 
 ---
+## Demo
 
+![App Screenshot](Simulator Screenshot - iPhone 17 Pro - 2026-04-06 at 23.18.26.png)
 ## How it works
 
 Traditional recommendation systems embed *metadata* (genre tags, artist similarity). Sonik embeds the *raw audio* itself.
