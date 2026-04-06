@@ -13,7 +13,11 @@ cache = Cache()
 def create_app():
     app = Flask(__name__, instance_relative_config=True)
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev')
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///flaskr.sqlite'
+    db_url = os.environ.get('DATABASE_URL', 'sqlite:///flaskr.sqlite')
+    # Supabase/Render give postgres:// but SQLAlchemy needs postgresql://
+    if db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = db_url
     # In-memory cache — fast, zero dependencies, sufficient for a single-server free tier
     app.config['CACHE_TYPE'] = 'SimpleCache'
     app.config['CACHE_DEFAULT_TIMEOUT'] = 300   # 5 minutes
